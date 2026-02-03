@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "kai"
+version = "0.1.0"
+description = "A meal prep system"
+authors = ["Oscar Bartle <Oscar.f.bartle@gmail.com>"]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = ">=3.13,<3.15"
+PySide6 = "^6.10.1"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+kai = "kai.main:main"
