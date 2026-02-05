@@ -8,7 +8,7 @@ class KaiUi(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("Kai")
-        self.resize(300,200)
+        self.resize(300,500)
 
         self.add_widgets()
         self.layout()
