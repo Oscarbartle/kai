@@ -1,10 +1,10 @@
 from kai.objects.item import Item
 from ..widgets.separators import create_hline
-from ..widgets.list_box import ListBox
 
-from PySide6.QtWidgets import QLabel, QWidget, QPushButton, QVBoxLayout, QFormLayout, QLineEdit, QComboBox
+from PySide6.QtWidgets import QWidget, QStyle, QStyleOption, QPushButton, QVBoxLayout, QFormLayout, QLineEdit, QLabel
+from PySide6.QtGui import QPainter
 
-class ItemsLayout(QWidget):
+class ItemsAdd(QWidget):
     def __init__(self):
         super().__init__()
 
@@ -17,6 +17,12 @@ class ItemsLayout(QWidget):
         self.create_layouts()
         self.add_layouts()
         self.connections()
+
+    def paintEvent(self, event):
+        opt = QStyleOption()
+        opt.initFrom(self)
+        p = QPainter(self)
+        self.style().drawPrimitive(QStyle.PE_Widget, opt, p, self)
 
     def create_widgets(self):
         self.title_label = QLabel("<h3>Add Items:</h3>")
@@ -32,11 +38,6 @@ class ItemsLayout(QWidget):
 
         self.button = QPushButton("Add Item")
 
-        self.items_label = QLabel("<h3>Existing Items:</h3>")
-
-        self.items_list = ListBox(searchable=True)
-        self.items_list.add_items(Item().get_item_names())
-
     def create_layouts(self):
         self.form_layout = QFormLayout()
         self.form_layout.addRow(self.item_name_label, self.item_name)
@@ -49,10 +50,6 @@ class ItemsLayout(QWidget):
         self.layout.addWidget(create_hline())
         self.layout.addLayout(self.form_layout)
         self.layout.addWidget(self.button)
-        self.layout.addWidget(create_hline())
-        self.layout.addWidget(self.items_label)
-        self.layout.addWidget(create_hline())
-        self.layout.addWidget(self.items_list)
 
     def connections(self):
         self.button.clicked.connect(self.on_add_item)
@@ -63,4 +60,7 @@ class ItemsLayout(QWidget):
         tags = self.item_tags.text().split(",")
         
         Item().create(name, stock_code, tags)
-        self.items_list._refresh_list_display(Item().get_item_names())
+        
+        self.item_name.clear()
+        self.item_stock_code.clear()
+        self.item_tags.clear()

@@ -1,41 +1,64 @@
-from kai.ui.layouts.items import ItemsLayout
+from kai.ui.layouts.items_add import ItemsAdd
+from kai.ui.layouts.tags import Tags
+from kai.ui.layouts.items_viewer import ItemsViewer
 
 import sys
-from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QGridLayout, QMainWindow
+from PySide6.QtWidgets import QApplication, QWidget, QGridLayout, QMainWindow
 
 class KaiUi(QMainWindow):
     def __init__(self):
         super().__init__()
 
         self.setWindowTitle("Kai")
-        self.resize(300,500)
+        self.resize(1000,600)
 
+        self.add_layouts()
         self.add_widgets()
-        self.layout()
         self.stylesheet()
         
     def stylesheet(self):
-        self.setStyleSheet(f"""        
-            QWidget#items_layout {{
+        self.setStyleSheet("""        
+            QWidget#items_add {
                 background-color: #23272e;
                 border-radius: 8px;
                 border: 2px solid #444c56;
-            }}
+            }
+            
+            QWidget#items_existing {
+                background-color: #23272e;
+                border-radius: 8px;
+                border: 2px solid #444c56;
+            }
+            
+            QWidget#items_details {
+                background-color: #23272e;
+                border-radius: 8px;
+                border: 2px solid #444c56;
+            }
         """)
         
-    def add_widgets(self):
+    def add_layouts(self):
         self.central_widget = QWidget()
-        self.main_layout = QVBoxLayout(self.central_widget)
-        self.grid_layout = QGridLayout()
-        
-        self.items_layout = ItemsLayout()
-        self.setObjectName("items_layout") 
-        
-    def layout(self):
         self.setCentralWidget(self.central_widget)
-        self.main_layout.setContentsMargins(5, 5, 5, 5)
-        self.main_layout.setSpacing(5)
-        self.main_layout.addWidget(self.items_layout)
+        self.grid_layout = QGridLayout(self.central_widget)
+        self.grid_layout.setContentsMargins(5, 5, 5, 5)
+        self.grid_layout.setSpacing(5)
+        
+        self.grid_layout.setColumnStretch(0, 1) 
+        self.grid_layout.setColumnStretch(1, 2)
+        
+    def add_widgets(self):
+        self.items_add = ItemsAdd()
+        self.items_add.setObjectName("items_add")
+        self.grid_layout.addWidget(self.items_add, 0, 0)
+        
+        self.items_existing = Tags()
+        self.items_existing.setObjectName("items_existing")
+        self.grid_layout.addWidget(self.items_existing, 1, 0)
+        
+        self.items_details = ItemsViewer()
+        self.items_details.setObjectName("items_details")
+        self.grid_layout.addWidget(self.items_details, 0, 1, 2, 1)
 
 def run():
     app = QApplication(sys.argv)
