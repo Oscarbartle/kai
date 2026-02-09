@@ -7,8 +7,10 @@ from PySide6.QtGui import QPainter
 
 
 class ItemsViewer(QWidget):
-    def __init__(self):
+    def __init__(self, state):
         super().__init__()
+
+        self.state = state
 
         self.layout = QVBoxLayout()
         self.layout.setContentsMargins(10, 10, 10, 10)  
@@ -58,11 +60,8 @@ class ItemsViewer(QWidget):
         self.scroll_layout.setContentsMargins(2, 2, 2, 2)
         self.scroll_layout.setSpacing(5)
         
-        items_data = Item().get_items()
-        items_data.sort(key=lambda x: x[0])
-        
-        for name, item_id in items_data:
-            self.scroll_layout.addWidget(ItemDetails(name))
+        self.reload_items()
+        self.connections()
 
         self.scroll_layout.addStretch()
         
@@ -73,3 +72,20 @@ class ItemsViewer(QWidget):
         self.layout.addWidget(self.items_label)
         self.layout.addWidget(create_hline())
         self.layout.addWidget(self.scroll_area)
+
+    def connections(self):
+        self.state.new_items.connect(self.reload_items)
+
+    def reload_items(self):
+        while self.scroll_layout.count():
+            child = self.scroll_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        items_data = Item().get_items()
+        items_data.sort(key=lambda x: x[0])
+
+        for name, item_id in items_data:
+            self.scroll_layout.addWidget(ItemDetails(name))
+
+        self.scroll_layout.addStretch()

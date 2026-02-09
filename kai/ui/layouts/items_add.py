@@ -5,8 +5,10 @@ from PySide6.QtWidgets import QWidget, QStyle, QStyleOption, QPushButton, QVBoxL
 from PySide6.QtGui import QPainter
 
 class ItemsAdd(QWidget):
-    def __init__(self):
+    def __init__(self, state):
         super().__init__()
+
+        self.state = state
 
         self.layout = QVBoxLayout()
         self.layout.setContentsMargins(10, 10, 10, 10)  
@@ -60,6 +62,8 @@ class ItemsAdd(QWidget):
         tags = self.item_tags.text().split(",")
         
         Item().create(name, stock_code, tags)
+
+        self.state.items_updated()
         
         self.item_name.clear()
         self.item_stock_code.clear()

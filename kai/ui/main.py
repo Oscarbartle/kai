@@ -1,6 +1,7 @@
 from kai.ui.layouts.items_add import ItemsAdd
 from kai.ui.layouts.tags import Tags
 from kai.ui.layouts.items_viewer import ItemsViewer
+from kai.ui.state import State
 
 import sys
 from PySide6.QtWidgets import QApplication, QWidget, QGridLayout, QMainWindow
@@ -48,15 +49,17 @@ class KaiUi(QMainWindow):
         self.grid_layout.setColumnStretch(1, 2)
         
     def add_widgets(self):
-        self.items_add = ItemsAdd()
+        self.state = State()
+
+        self.items_add = ItemsAdd(self.state)
         self.items_add.setObjectName("items_add")
         self.grid_layout.addWidget(self.items_add, 0, 0)
         
-        self.items_existing = Tags()
+        self.items_existing = Tags(self.state)
         self.items_existing.setObjectName("items_existing")
         self.grid_layout.addWidget(self.items_existing, 1, 0)
         
-        self.items_details = ItemsViewer()
+        self.items_details = ItemsViewer(self.state)
         self.items_details.setObjectName("items_details")
         self.grid_layout.addWidget(self.items_details, 0, 1, 2, 1)
 

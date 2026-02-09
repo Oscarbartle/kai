@@ -6,8 +6,10 @@ from PySide6.QtWidgets import QLabel, QWidget, QVBoxLayout, QStyle, QStyleOption
 from PySide6.QtGui import QPainter
 
 class Tags(QWidget):
-    def __init__(self):
+    def __init__(self, state):
         super().__init__()
+
+        self.state = state
 
         self.layout = QVBoxLayout()
         self.layout.setContentsMargins(10, 10, 10, 10)  
