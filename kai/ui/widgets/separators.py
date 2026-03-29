@@ -1,13 +1,17 @@
-from PySide6.QtWidgets import QFrame, QWidget
+from kai.ui import theme
+
+from PySide6.QtWidgets import QWidget
 
 def create_hline():
+    t = theme.theme()
     line = QWidget()
-    line.setFixedHeight(2)
-    line.setStyleSheet("background-color: #444c56; border-radius: 1px;")
+    line.setFixedHeight(1)
+    line.setStyleSheet(f"background-color: {t.border}; border-radius: 0px;")
     return line
 
 def create_vline():
+    t = theme.theme()
     line = QWidget()
-    line.setFixedWidth(2)
-    line.setStyleSheet("background-color: #444c56; border-radius: 1px;")
+    line.setFixedWidth(1)
+    line.setStyleSheet(f"background-color: {t.border}; border-radius: 0px;")
     return line
