@@ -10,6 +10,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import json
+import sys
+
+
+def _platform_font() -> str:
+    """Return a CSS font-family string with only fonts that exist on this OS."""
+    if sys.platform == "darwin":
+        return '".AppleSystemUIFont", "Helvetica Neue"'
+    if sys.platform == "win32":
+        return '"Segoe UI", "Arial"'
+    # Linux / other
+    return '"Ubuntu", "Noto Sans", "DejaVu Sans", "Arial"'
 
 
 # ── colour palettes ──────────────────────────────────────────────── #
@@ -498,7 +509,7 @@ def global_stylesheet() -> str:
         }}
 
         QWidget {{
-            font-family: -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+            font-family: {_platform_font()};
         }}
 
         QLabel {{

@@ -1,26 +1,28 @@
 from kai.objects.item import Item
 from kai.utils.format_date import format_date
 from kai.ui import theme
+from kai.ui.refresh_worker import run_refresh
 from kai.core import settings as app_settings
 
 from datetime import datetime, timedelta
 from PySide6.QtWidgets import QLabel, QWidget, QGridLayout, QStyle, QStyleOption, QHBoxLayout, QCheckBox, QPushButton, QMenu, QDialog, QVBoxLayout
 from PySide6.QtGui import QPainter, QAction
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 
 class ItemDetails(QWidget):
-    def __init__(self, item_name, state=None):
+    def __init__(self, item_name, state=None, doc=None):
         super().__init__()
 
         self.state = state
-        doc = Item().get_item_details(item_name)
+        if doc is None:
+            doc = Item().get_item_details(item_name)
 
         if doc is None:
             print(f"Item {item_name} not found")
             return
 
         self.name = doc["name"]
-        self.id = self._get_id_by_name(item_name)
 
         self.stock_code = doc["stock_code"]
 
@@ -69,6 +71,7 @@ class ItemDetails(QWidget):
         self.date_added = doc["date_added"]
         self.date_updated = doc.get("date_updated", self.date_added)
         self.is_long_term = doc.get("is_long_term", False)
+        self.is_unavailable = doc.get("unavailable", False)
 
         self.setObjectName("item_card")
         self.setMinimumHeight(62)
@@ -85,12 +88,19 @@ class ItemDetails(QWidget):
 
     def set_stylesheet(self):
         t = theme.theme()
-        border_color = t.success if self.is_special else t.border
+        if self.is_unavailable:
+            border_color = t.text_faint
+        elif self.is_special:
+            border_color = t.success
+        else:
+            border_color = t.border
+        opacity = "opacity: 0.6;" if self.is_unavailable else ""
         self.setStyleSheet(f"""
             QWidget#item_card {{
                 background-color: {t.card};
                 border-radius: 8px;
                 border: 2px solid {border_color};
+                {opacity}
             }}
         """)
 
@@ -115,16 +125,31 @@ class ItemDetails(QWidget):
         self.tags_label = QLabel(f"{', '.join(self.tags)}")
         self.tags_label.setStyleSheet(f"color: {t.text_faint}; font-size: 11px; padding-left: 4px;")
 
-        price_color = t.success if self.is_special else t.accent
+        if self.is_unavailable:
+            price_color = t.text_faint
+        elif self.is_special:
+            price_color = t.success
+        else:
+            price_color = t.accent
         self.price_label = QLabel(f"<b>${self.display_price:.2f}{self.display_suffix}</b>")
         self.price_label.setStyleSheet(f"color: {price_color}; font-size: 14px;")
-
-        if self.is_special:
+        if self.is_unavailable:
+            self.price_label.setToolTip("Last known price — item page could not be reached")
+        elif self.is_special:
             promo_start_text = format_date(self.promo_start) if self.promo_start else "N/A"
             promo_end_text = format_date(self.promo_end) if self.promo_end else "N/A"
             self.price_label.setToolTip(f"On sale: {promo_start_text} → {promo_end_text}")
 
         # special end date label
+        if self.is_unavailable:
+            self.unavailable_label = QLabel("Unavailable")
+            self.unavailable_label.setStyleSheet(
+                f"color: {t.text_faint}; font-size: 10px; font-style: italic;"
+            )
+            self.unavailable_label.setToolTip("Item page could not be reached on last refresh")
+        else:
+            self.unavailable_label = None
+
         if self.is_special and self.promo_end:
             self.promo_end_label = QLabel(f"ends {format_date(self.promo_end)}")
             self.promo_end_label.setStyleSheet(f"color: {t.success}; font-size: 10px;")
@@ -228,7 +253,9 @@ class ItemDetails(QWidget):
         right_row1 = QHBoxLayout()
         right_row1.setContentsMargins(0, 0, 0, 0)
         right_row1.setSpacing(8)
-        if self.promo_end_label:
+        if self.unavailable_label:
+            right_row1.addWidget(self.unavailable_label)
+        elif self.promo_end_label:
             right_row1.addWidget(self.promo_end_label)
         right_row1.addStretch()
         right_row1.addWidget(self.stock_code_label)
@@ -240,9 +267,10 @@ class ItemDetails(QWidget):
             self.state.items_updated()
 
     def _on_refresh(self):
-        Item().refresh_online_data(self.name)
+        callbacks = []
         if self.state:
-            self.state.items_updated()
+            callbacks = [self.state.items_updated]
+        run_refresh([self.name], on_done=callbacks, parent=self)
 
     def _on_delete(self):
         Item().delete(self.name)
@@ -260,7 +288,16 @@ class ItemDetails(QWidget):
         edit_action = QAction("Edit Item", self)
         edit_action.triggered.connect(self._open_edit_dialog)
         menu.addAction(edit_action)
+
+        woolworths_action = QAction("Open in Browser", self)
+        woolworths_action.triggered.connect(self._open_in_woolworths)
+        menu.addAction(woolworths_action)
+
         menu.exec(event.globalPos())
+
+    def _open_in_woolworths(self):
+        url = QUrl(f"https://www.woolworths.co.nz/shop/productdetails?stockcode={self.stock_code}")
+        QDesktopServices.openUrl(url)
 
     def _open_edit_dialog(self):
         from kai.ui.layouts.items_add import ItemsAdd

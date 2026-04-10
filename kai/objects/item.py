@@ -6,9 +6,14 @@ from kai.core import settings
 from .woolworths_data import WoolworthsData
 
 class Item:
+    _migrated: set[str] = set()
+
     def __init__(self):
         self.io = IO(settings.data_dir() / "items.json")
-        self._migrate()
+        key = str(self.io.path)
+        if key not in Item._migrated:
+            self._migrate()
+            Item._migrated.add(key)
 
     def _migrate(self):
         """Add missing fields to existing items"""
@@ -194,5 +199,8 @@ class Item:
             self.io.update(item_id, {
                 "online_data": new_data,
                 "date_updated": datetime.now().isoformat(),
+                "unavailable": False,
             })
+        else:
+            self.io.update(item_id, {"unavailable": True})
         return new_data

@@ -1,6 +1,5 @@
 import urllib.request
 import json
-from urllib.error import HTTPError
 
 class WoolworthsData:
     def __init__(self, stock_code):
@@ -10,7 +9,7 @@ class WoolworthsData:
     def get_data(self):
         req = urllib.request.Request(self.url, headers=self.headers)
         try:
-            with urllib.request.urlopen(req) as response:
+            with urllib.request.urlopen(req, timeout=10) as response:
                 raw = json.loads(response.read().decode())
                 p = raw.get("price", {})
                 s = raw.get("size", {})
@@ -34,9 +33,7 @@ class WoolworthsData:
                         "Promo End": p.get("promotionEndDate")
                     },
                 }
-        except HTTPError as e:
-            if e.code == 404:
-                return None
-            else:
-                raise
+        except Exception as e:
+            print(f"[woolworths] fetch failed for {self.url}: {e}")
+            return None
             

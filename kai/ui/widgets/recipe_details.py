@@ -3,6 +3,7 @@ from kai.objects.item import Item
 from kai.objects.shopping_list import ShoppingList
 from kai.utils.format_date import format_date
 from kai.ui import theme
+from kai.ui.refresh_worker import run_refresh
 
 from datetime import datetime, timedelta
 from PySide6.QtWidgets import (
@@ -12,6 +13,15 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QPainter, QCursor, QAction
 from PySide6.QtCore import Qt, Signal
+
+# Module-level caches — busted whenever items or recipes change.
+_cost_cache: dict[str, tuple] = {}
+_analysis_cache: dict[str, tuple] = {}
+
+
+def invalidate_recipe_card_cache():
+    _cost_cache.clear()
+    _analysis_cache.clear()
 
 class RecipeDetails(QWidget):
     recipe_clicked = Signal(str)
@@ -35,7 +45,7 @@ class RecipeDetails(QWidget):
         self.is_favourite = doc.get("is_favourite", False)
         self.date_added = doc.get("date_added", "")
 
-        self.estimated_cost, self.estimated_cost_full = self._calculate_cost()
+        self.estimated_cost, self.estimated_cost_full, self.estimated_cost_nominal = self._calculate_cost()
         self.savings_regular, self.savings_lt, self.specials_count, self.is_stale, self.stale_count = self._analyse_ingredients()
         self.total_savings = self.savings_regular + self.savings_lt
 
@@ -50,16 +60,25 @@ class RecipeDetails(QWidget):
         self.add_layouts()
 
     def _calculate_cost(self):
+        if self.name in _cost_cache:
+            return _cost_cache[self.name]
         sl = ShoppingList()
         entries = [{"recipe_name": self.name, "multiplier": 1}]
         items = sl.compute_items(entries, True)
         lt_items = sl.compute_long_term_items(entries)
+        nominal_items = sl.compute_nominal_items(entries)
         total = sum(it["price"] for it in items if it.get("price"))
         lt_total = sum(it["price"] for it in lt_items if it.get("price"))
-        return round(total, 2), round(total + lt_total, 2)
+        nominal_total = sum(it["price"] for it in nominal_items if it.get("price"))
+        result = round(total, 2), round(total + lt_total, 2), round(nominal_total, 2)
+        _cost_cache[self.name] = result
+        return result
 
     def _analyse_ingredients(self):
         """Check ingredient items for specials and stale data."""
+        if self.name in _analysis_cache:
+            return _analysis_cache[self.name]
+
         item_obj = Item()
         savings_regular = 0.0
         savings_lt = 0.0
@@ -99,7 +118,9 @@ class RecipeDetails(QWidget):
                     stale_count += 1
                     is_stale = True
 
-        return round(savings_regular, 2), round(savings_lt, 2), specials_count, is_stale, stale_count
+        result = round(savings_regular, 2), round(savings_lt, 2), specials_count, is_stale, stale_count
+        _analysis_cache[self.name] = result
+        return result
 
     def set_stylesheet(self):
         t = theme.theme()
@@ -146,25 +167,23 @@ class RecipeDetails(QWidget):
         lines = []
         for ing in self.ingredients:
             text = ing.get("item_name", "?")
-            amount = ing.get("amount", 1) or 1
-            unit = ing.get("unit", "ea")
-            if unit != "ea" or amount != 1:
-                amt = int(amount) if amount == int(amount) else amount
-                text = f"{amt}{unit}  {text}"
+            if ing.get("nominal"):
+                text = f"~  {text}"
+            else:
+                amount = ing.get("amount", 1) or 1
+                unit = ing.get("unit", "ea")
+                if unit != "ea" or amount != 1:
+                    amt = int(amount) if amount == int(amount) else amount
+                    text = f"{amt}{unit}  {text}"
             lines.append(f"\u2022 {text}")
         self.ing_count_label.setToolTip("\n".join(lines) if lines else "No ingredients")
 
         # sale savings labels (green for regular, orange for LT)
         self.savings_label = None
-        self.savings_lt_label = None
         if self.savings_regular > 0:
             self.savings_label = QLabel(f"▼ ${self.savings_regular:.2f} off")
             self.savings_label.setStyleSheet(f"color: {t.success}; font-size: 11px; font-weight: bold;")
-            self.savings_label.setToolTip("Savings from regular items on sale")
-        if self.savings_lt > 0:
-            self.savings_lt_label = QLabel(f"▼ ${self.savings_lt:.2f} off")
-            self.savings_lt_label.setStyleSheet(f"color: {t.text_dim}; font-size: 11px; font-weight: bold;")
-            self.savings_lt_label.setToolTip("Savings from long-term items on sale")
+            self.savings_label.setToolTip("Savings from items on sale")
 
         # stale data warning
         if self.is_stale:
@@ -179,12 +198,19 @@ class RecipeDetails(QWidget):
 
         if self.estimated_cost > 0:
             cost_text = f"${self.estimated_cost}"
+            tooltip_parts = []
             if self.estimated_cost_full != self.estimated_cost:
-                cost_text += f" <span style='color:{t.text_dim};font-size:11px;'>(${self.estimated_cost_full} w/LT)</span>"
+                tooltip_parts.append(f"${self.estimated_cost_full} with long-term items")
+            if self.estimated_cost_nominal > 0:
+                tooltip_parts.append(f"+${self.estimated_cost_nominal} nominal")
+            cost_tooltip = "\n".join(tooltip_parts) if tooltip_parts else ""
         else:
             cost_text = "N/A"
+            cost_tooltip = ""
         self.cost_label = QLabel(f"<b>{cost_text}</b>")
         self.cost_label.setStyleSheet(f"color: {t.accent}; font-size: 14px;")
+        if cost_tooltip:
+            self.cost_label.setToolTip(cost_tooltip)
 
         self.date_label = QLabel(f"{format_date(self.date_added)}" if self.date_added else "")
         self.date_label.setStyleSheet(f"color: {t.text_faint}; font-size: 11px;")
@@ -253,14 +279,12 @@ class RecipeDetails(QWidget):
 
         right_row1 = QHBoxLayout()
         right_row1.setContentsMargins(0, 0, 0, 0)
-        right_row1.setSpacing(8)
-        if self.savings_label:
-            right_row1.addWidget(self.savings_label)
-        if self.savings_lt_label:
-            right_row1.addWidget(self.savings_lt_label)
+        right_row1.setSpacing(12)
+        right_row1.addStretch()
         if self.stale_label:
             right_row1.addWidget(self.stale_label)
-        right_row1.addStretch()
+        if self.savings_label:
+            right_row1.addWidget(self.savings_label)
         right_row1.addWidget(self.cost_label)
         self.grid_layout.addLayout(right_row1, 1, 2)
 
@@ -272,14 +296,11 @@ class RecipeDetails(QWidget):
 
     def _on_refresh(self):
         """Refresh Woolworths data for every ingredient in this recipe."""
-        item_obj = Item()
-        for ing in self.ingredients:
-            name = ing.get("item_name")
-            if name:
-                item_obj.refresh_online_data(name)
+        names = [ing.get("item_name") for ing in self.ingredients if ing.get("item_name")]
+        callbacks = []
         if self.state:
-            self.state.items_updated()
-            self.state.recipes_updated()
+            callbacks = [self.state.items_updated, self.state.recipes_updated]
+        run_refresh(names, on_done=callbacks, parent=self)
 
     def _on_delete(self):
         reply = QMessageBox.question(

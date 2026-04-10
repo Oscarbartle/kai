@@ -3,6 +3,7 @@ from kai.objects.item import Item
 from kai.objects.shopping_list import ShoppingList
 from ..widgets.shopping_item import ShoppingItem
 from kai.ui import theme
+from kai.ui.refresh_worker import run_refresh
 from kai.utils.format_date import format_date
 from kai.core import settings as app_settings
 
@@ -13,10 +14,45 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QComboBox,
     QPushButton, QCheckBox, QScrollArea, QStyle, QStyleOption,
-    QApplication, QSpinBox, QStackedWidget, QLineEdit, QSizePolicy, QSplitter
+    QApplication, QSpinBox, QStackedWidget, QLineEdit, QSizePolicy, QSplitter, QSplitterHandle
 )
-from PySide6.QtGui import QPainter, QCursor
-from PySide6.QtCore import Qt
+from PySide6.QtGui import QPainter, QCursor, QColor
+from PySide6.QtCore import Qt, QRect
+
+
+# ── styled splitter ───────────────────────────────────────────── #
+
+class _SplitterHandle(QSplitterHandle):
+    def __init__(self, orientation, parent):
+        super().__init__(orientation, parent)
+        self._hovered = False
+        self.setMouseTracking(True)
+
+    def enterEvent(self, event):
+        self._hovered = True
+        self.update()
+
+    def leaveEvent(self, event):
+        self._hovered = False
+        self.update()
+
+    def paintEvent(self, event):
+        t = theme.theme()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pill_w, pill_h = 32, 3
+        cx = self.width() // 2
+        cy = self.height() // 2
+        rect = QRect(cx - pill_w // 2, cy - pill_h // 2, pill_w, pill_h)
+        p.setPen(Qt.PenStyle.NoPen)
+        color = QColor(t.accent) if self._hovered else QColor(t.border)
+        p.setBrush(color)
+        p.drawRoundedRect(rect, pill_h // 2, pill_h // 2)
+
+
+class StyledSplitter(QSplitter):
+    def createHandle(self):
+        return _SplitterHandle(self.orientation(), self)
 
 
 # ── collapsible section ────────────────────────────────────────── #
@@ -647,6 +683,7 @@ class ShoppingListPage(QWidget):
         self.export_button = QPushButton("Copy")
         self.export_button.setProperty("btn", "secondary")
         self.export_button.setFixedHeight(30)
+        self.export_button.setToolTip("Copy list to clipboard")
         self.export_button.setEnabled(False)
         top_row.addWidget(self.export_button)
 
@@ -685,12 +722,8 @@ class ShoppingListPage(QWidget):
         right_layout.addWidget(sep)
 
         # ── Splitter: items list (top) + cart/LT (bottom) ──
-        self.right_splitter = QSplitter(Qt.Orientation.Vertical)
-        self.right_splitter.setHandleWidth(6)
-        self.right_splitter.setStyleSheet("""
-            QSplitter::handle { background-color: transparent; }
-            QSplitter::handle:hover { background-color: palette(mid); }
-        """)
+        self.right_splitter = StyledSplitter(Qt.Orientation.Vertical)
+        self.right_splitter.setHandleWidth(16)
 
         # top pane: scrollable items list
         self.items_scroll = QScrollArea()
@@ -1046,7 +1079,16 @@ class ShoppingListPage(QWidget):
 
     # ── cart management ────────────────────────────────────────── #
 
+    def _refresh_recipe_metadata(self, recipe_name):
+        """Refresh Woolworths data for every ingredient in a recipe without blocking the UI."""
+        doc = Recipe().get_recipe_details(recipe_name)
+        if not doc:
+            return
+        names = [ing.get("item_name") for ing in doc.get("ingredients", []) if ing.get("item_name")]
+        run_refresh(names, on_done=self.state.items_updated, parent=self)
+
     def _add_recipe_to_cart(self, recipe_name, multiplier):
+        self._refresh_recipe_metadata(recipe_name)
         for entry in self.recipe_entries:
             if entry["recipe_name"] == recipe_name:
                 entry["multiplier"] += multiplier
@@ -1474,13 +1516,80 @@ class ShoppingListPage(QWidget):
         clipboard.setText("\n".join(lines))
 
     def _on_links(self):
-        """Open Woolworths product pages for all items in browser tabs."""
+        """Add all shopping list items to the Woolworths cart via the REST API."""
         if not self.preview_items:
             return
 
+        from kai.core.woolworths_cart import get_session, check_auth, start_cart_worker
+        from kai.ui.widgets.cart_confirm_dialog import CartConfirmDialog, CartProgressDialog
+
+        # Build item list with stock codes and quantities
         item_obj = Item()
+        cart_items = []
         for item in self.preview_items:
             details = item_obj.get_item_details(item["item_name"])
-            if details and details.get("stock_code"):
-                code = details["stock_code"]
-                webbrowser.open(f"https://www.woolworths.co.nz/shop/productdetails?stockcode={code}")
+            stock_code = details.get("stock_code") if details else None
+            cart_items.append({
+                "name": item["item_name"],
+                "stock_code": stock_code,
+                "qty": item.get("units_needed", 1),
+                "units_needed": item.get("units_needed", 1),
+                "price": item.get("price"),
+            })
+
+        # Confirmation dialog
+        confirm = CartConfirmDialog(cart_items, parent=self)
+        if confirm.exec() != CartConfirmDialog.DialogCode.Accepted:
+            return
+
+        accepted = confirm.accepted_items
+        if not accepted:
+            return
+
+        # Try to get a valid browser session
+        session = get_session()
+        if session is None or not check_auth(session):
+            # Auth failed — fall back to opening tabs
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "Not logged in",
+                f"Could not find a Woolworths session in your browser.\n\n"
+                f"Please log in to woolworths.co.nz in your browser, then try again.\n\n"
+                f"You can change your browser in Settings.",
+            )
+            for item in accepted:
+                webbrowser.open(
+                    f"https://www.woolworths.co.nz/shop/productdetails?stockcode={item['stock_code']}"
+                )
+            return
+
+        # Worker items only need name, stock_code, qty
+        worker_items = [
+            {"name": i["name"], "stock_code": i["stock_code"], "qty": i["qty"]}
+            for i in accepted
+        ]
+
+        progress = CartProgressDialog(len(worker_items), parent=self)
+
+        def _on_auth_failed():
+            progress.close()
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "Session expired",
+                "Your Woolworths session has expired.\n\n"
+                "Please log in to woolworths.co.nz in your browser, then try again.",
+            )
+            for item in accepted:
+                webbrowser.open(
+                    f"https://www.woolworths.co.nz/shop/productdetails?stockcode={item['stock_code']}"
+                )
+
+        start_cart_worker(
+            worker_items,
+            on_item_done=progress.mark_item,
+            on_auth_failed=_on_auth_failed,
+            on_finished=progress.on_finished,
+        )
+        progress.exec()

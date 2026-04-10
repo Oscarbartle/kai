@@ -5,9 +5,9 @@ from kai.ui import theme
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLineEdit, QLabel,
     QPushButton, QSpinBox, QDoubleSpinBox, QComboBox, QTextEdit, QHBoxLayout, QStyle, QStyleOption,
-    QListWidget, QListWidgetItem, QAbstractItemView, QTabWidget, QStackedWidget
+    QListWidget, QListWidgetItem, QAbstractItemView, QStackedWidget, QCheckBox, QFrame
 )
-from PySide6.QtGui import QPainter, QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QPainter, QDragEnterEvent, QDropEvent, QCursor
 from PySide6.QtCore import Qt, QMimeData
 
 
@@ -68,10 +68,9 @@ class RecipesAdd(QWidget):
         self.ingredients_list = []
         self._edit_name = edit_recipe  # recipe name to edit, or None for new
 
-        self.layout = QVBoxLayout()
-        self.layout.setContentsMargins(24, 20, 24, 20)
-        self.layout.setSpacing(12)
-        self.setLayout(self.layout)
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(20, 18, 20, 18)
+        self.layout.setSpacing(14)
 
         self.create_widgets()
         self.add_layouts()
@@ -86,119 +85,183 @@ class RecipesAdd(QWidget):
         p = QPainter(self)
         self.style().drawPrimitive(QStyle.PE_Widget, opt, p, self)
 
+    def _section_label(self, text: str) -> QLabel:
+        t = theme.theme()
+        lbl = QLabel(text)
+        lbl.setStyleSheet(
+            f"color: {t.text_dim}; font-size: 10px; font-weight: 700; "
+            f"letter-spacing: 0.8px; text-transform: uppercase;"
+        )
+        return lbl
+
+    def _divider(self) -> QFrame:
+        t = theme.theme()
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setStyleSheet(f"background: {t.border}; border: none; max-height: 1px;")
+        return line
+
     def create_widgets(self):
         t = theme.theme()
 
-        # ----- tab widget ----- #
-        self.tabs = QTabWidget()
-        self.tabs.setProperty("tab", "inner")
+        # ── left panel: details + instructions ─────────────── #
+        self.left_panel = QWidget()
+        self.left_panel.setObjectName("recipe_left_panel")
+        self.left_panel.setStyleSheet(f"""
+            QWidget#recipe_left_panel {{
+                background: {t.card};
+                border: 1px solid {t.border};
+                border-radius: 10px;
+            }}
+        """)
+        left_layout = QVBoxLayout(self.left_panel)
+        left_layout.setContentsMargins(16, 16, 16, 16)
+        left_layout.setSpacing(12)
 
-        # ----- tab 1: details ----- #
-        self.details_tab = QWidget()
-        details_layout = QVBoxLayout(self.details_tab)
-        details_layout.setContentsMargins(16, 16, 16, 16)
-        details_layout.setSpacing(14)
+        left_layout.addWidget(self._section_label("Recipe Details"))
 
-        name_label = QLabel("Name")
-        name_label.setProperty("role", "dim")
-        details_layout.addWidget(name_label)
+        # name
+        name_lbl = QLabel("Name")
+        name_lbl.setProperty("role", "dim")
+        left_layout.addWidget(name_lbl)
         self.recipe_name = QLineEdit()
         self.recipe_name.setPlaceholderText("Recipe name")
-        details_layout.addWidget(self.recipe_name)
+        self.recipe_name.setFixedHeight(34)
+        left_layout.addWidget(self.recipe_name)
 
-        servings_row = QHBoxLayout()
-        servings_row.setSpacing(12)
-        servings_col = QVBoxLayout()
-        servings_col.setSpacing(4)
-        servings_label = QLabel("Servings")
-        servings_label.setProperty("role", "dim")
-        servings_col.addWidget(servings_label)
+        # servings + tags row
+        meta_row = QHBoxLayout()
+        meta_row.setSpacing(12)
+
+        srv_col = QVBoxLayout()
+        srv_col.setSpacing(4)
+        srv_lbl = QLabel("Servings")
+        srv_lbl.setProperty("role", "dim")
+        srv_col.addWidget(srv_lbl)
         self.recipe_servings = QSpinBox()
         self.recipe_servings.setMinimum(1)
         self.recipe_servings.setValue(1)
+        self.recipe_servings.setFixedHeight(34)
         self.recipe_servings.setFixedWidth(80)
-        servings_col.addWidget(self.recipe_servings)
-        servings_row.addLayout(servings_col)
-        servings_row.addStretch()
-        details_layout.addLayout(servings_row)
+        srv_col.addWidget(self.recipe_servings)
+        meta_row.addLayout(srv_col)
 
-        tags_label = QLabel("Tags")
-        tags_label.setProperty("role", "dim")
-        details_layout.addWidget(tags_label)
+        tags_col = QVBoxLayout()
+        tags_col.setSpacing(4)
+        tags_lbl = QLabel("Tags")
+        tags_lbl.setProperty("role", "dim")
+        tags_col.addWidget(tags_lbl)
         self.recipe_tags = QLineEdit()
         self.recipe_tags.setPlaceholderText("e.g. Dinner, Italian")
-        details_layout.addWidget(self.recipe_tags)
+        self.recipe_tags.setFixedHeight(34)
+        tags_col.addWidget(self.recipe_tags)
+        meta_row.addLayout(tags_col, 1)
 
-        details_layout.addStretch()
+        left_layout.addLayout(meta_row)
+        left_layout.addWidget(self._divider())
 
-        # ----- tab 2: ingredients ----- #
-        self.ingredients_tab = QWidget()
-        ing_layout = QVBoxLayout(self.ingredients_tab)
-        ing_layout.setContentsMargins(12, 12, 12, 12)
-        ing_layout.setSpacing(8)
+        left_layout.addWidget(self._section_label("Instructions"))
+        self.recipe_instructions = QTextEdit()
+        self.recipe_instructions.setPlaceholderText("Write the recipe steps here…")
+        left_layout.addWidget(self.recipe_instructions, 1)
 
-        hint_label = QLabel("Drag items or use the arrow buttons. Double-click to add/remove.")
-        hint_label.setProperty("role", "faint")
-        hint_label.setWordWrap(True)
-        ing_layout.addWidget(hint_label)
+        # ── right panel: ingredients ────────────────────────── #
+        self.right_panel = QWidget()
+        self.right_panel.setObjectName("recipe_right_panel")
+        self.right_panel.setStyleSheet(f"""
+            QWidget#recipe_right_panel {{
+                background: {t.card};
+                border: 1px solid {t.border};
+                border-radius: 10px;
+            }}
+        """)
+        right_layout = QVBoxLayout(self.right_panel)
+        right_layout.setContentsMargins(16, 16, 16, 16)
+        right_layout.setSpacing(10)
 
-        picker_layout = QHBoxLayout()
-        picker_layout.setSpacing(8)
+        right_layout.addWidget(self._section_label("Ingredients"))
 
-        # left column: available
-        left_col = QVBoxLayout()
-        left_col.setSpacing(4)
-        avail_label = QLabel("Available Items")
-        avail_label.setProperty("role", "dim")
-        left_col.addWidget(avail_label)
-
+        # search bars row
+        search_row = QHBoxLayout()
+        search_row.setSpacing(8)
         self.available_search = QLineEdit()
-        self.available_search.setPlaceholderText("Search items...")
+        self.available_search.setPlaceholderText("Search items…")
         self.available_search.setClearButtonEnabled(True)
-        left_col.addWidget(self.available_search)
+        self.available_search.setFixedHeight(30)
+        search_row.addWidget(self.available_search, 1)
+        search_row.addSpacing(46)  # aligns with transfer buttons gap
+        lbl_sel = QLabel("Recipe items")
+        lbl_sel.setProperty("role", "faint")
+        lbl_sel.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        search_row.addWidget(lbl_sel, 1)
+        right_layout.addLayout(search_row)
+
+        # dual-list + transfer buttons
+        lists_row = QHBoxLayout()
+        lists_row.setSpacing(0)
 
         self.available_list = DragSourceList()
+        self.available_list.setMinimumWidth(160)
         self._refresh_item_list()
-        left_col.addWidget(self.available_list, 1)
+        lists_row.addWidget(self.available_list, 1)
 
-        # center column: transfer buttons
-        center_col = QVBoxLayout()
-        center_col.addStretch()
+        # transfer button column
+        btn_col = QVBoxLayout()
+        btn_col.setContentsMargins(8, 0, 8, 0)
+        btn_col.setSpacing(6)
+        btn_col.addStretch()
 
-        self.add_ing_button = QPushButton(">")
-        self.add_ing_button.setToolTip("Add selected items")
-        self.add_ing_button.setFixedSize(34, 34)
-        self.add_ing_button.setProperty("btn", "secondary")
-        center_col.addWidget(self.add_ing_button)
+        self.add_ing_button = QPushButton("›")
+        self.add_ing_button.setToolTip("Add selected")
+        self.add_ing_button.setFixedSize(30, 30)
+        self.add_ing_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.add_ing_button.setStyleSheet(f"""
+            QPushButton {{
+                background: {t.surface};
+                color: {t.text_dim};
+                border: 1px solid {t.border};
+                border-radius: 6px;
+                font-size: 18px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: {t.accent};
+                color: {t.accent_fg};
+                border-color: {t.accent};
+            }}
+        """)
+        btn_col.addWidget(self.add_ing_button)
 
-        self.remove_ing_button = QPushButton("<")
-        self.remove_ing_button.setToolTip("Remove selected items")
-        self.remove_ing_button.setFixedSize(34, 34)
-        self.remove_ing_button.setProperty("btn", "secondary")
-        center_col.addWidget(self.remove_ing_button)
-
-        center_col.addStretch()
-
-        # right column: selected
-        right_col = QVBoxLayout()
-        right_col.setSpacing(4)
-        sel_label = QLabel("Recipe Items")
-        sel_label.setProperty("role", "dim")
-        right_col.addWidget(sel_label)
+        self.remove_ing_button = QPushButton("‹")
+        self.remove_ing_button.setToolTip("Remove selected")
+        self.remove_ing_button.setFixedSize(30, 30)
+        self.remove_ing_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.remove_ing_button.setStyleSheet(self.add_ing_button.styleSheet())
+        btn_col.addWidget(self.remove_ing_button)
+        btn_col.addStretch()
+        lists_row.addLayout(btn_col)
 
         self.selected_list = DropTargetList(on_drop_callback=self._on_items_dropped)
-        right_col.addWidget(self.selected_list, 1)
+        self.selected_list.setMinimumWidth(160)
+        lists_row.addWidget(self.selected_list, 1)
 
-        # amount / unit row
+        right_layout.addLayout(lists_row, 1)
+
+        right_layout.addWidget(self._divider())
+
+        # ── qty / nominal editor ──────────────────────────── #
+        qty_label = self._section_label("Set Amount  —  select an item above")
+        right_layout.addWidget(qty_label)
+
         qty_row = QHBoxLayout()
-        qty_row.setSpacing(8)
+        qty_row.setSpacing(10)
 
         self.amount_spin = QSpinBox()
         self.amount_spin.setMinimum(1)
         self.amount_spin.setMaximum(99999)
         self.amount_spin.setValue(1)
         self.amount_spin.setSingleStep(10)
-        self.amount_spin.setFixedHeight(32)
+        self.amount_spin.setFixedHeight(34)
 
         self.amount_spin_float = QDoubleSpinBox()
         self.amount_spin_float.setMinimum(0.1)
@@ -206,51 +269,46 @@ class RecipesAdd(QWidget):
         self.amount_spin_float.setValue(1.0)
         self.amount_spin_float.setDecimals(1)
         self.amount_spin_float.setSingleStep(0.1)
-        self.amount_spin_float.setFixedHeight(32)
+        self.amount_spin_float.setFixedHeight(34)
 
         self.amount_stack = QStackedWidget()
         self.amount_stack.addWidget(self.amount_spin)
         self.amount_stack.addWidget(self.amount_spin_float)
         self.amount_stack.setCurrentIndex(0)
-        qty_row.addWidget(self.amount_stack, 1)
+        self.amount_stack.setFixedHeight(34)
+        qty_row.addWidget(self.amount_stack, 3)
 
         self.unit_combo = QComboBox()
         self.unit_combo.addItems(["g", "kg", "mL", "L", "ea"])
-        self.unit_combo.setFixedHeight(32)
-        self.unit_combo.setMinimumWidth(58)
+        self.unit_combo.setFixedHeight(34)
+        self.unit_combo.setFixedWidth(72)
         qty_row.addWidget(self.unit_combo)
 
-        self.set_qty_button = QPushButton("Set")
-        self.set_qty_button.setFixedHeight(32)
-        self.set_qty_button.setFixedWidth(48)
-        self.set_qty_button.setProperty("btn", "secondary")
+        self.nominal_cb = QCheckBox("Nominal")
+        self.nominal_cb.setToolTip(
+            "Use when an exact amount doesn't matter (e.g. olive oil, salt). "
+            "Excluded from the recipe cost total; counted as 1 unit on shopping lists."
+        )
+        self.nominal_cb.setFixedHeight(34)
+        qty_row.addWidget(self.nominal_cb)
+
+        qty_row.addStretch(1)
+
+        self.set_qty_button = QPushButton("Apply")
+        self.set_qty_button.setFixedHeight(34)
+        self.set_qty_button.setMinimumWidth(80)
+        self.set_qty_button.setProperty("btn", "primary")
+        self.set_qty_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         qty_row.addWidget(self.set_qty_button)
-        right_col.addLayout(qty_row)
 
-        picker_layout.addLayout(left_col, 1)
-        picker_layout.addLayout(center_col)
-        picker_layout.addLayout(right_col, 1)
+        right_layout.addLayout(qty_row)
 
-        ing_layout.addLayout(picker_layout, 1)
-
-        # ----- tab 3: instructions ----- #
-        self.instructions_tab = QWidget()
-        inst_layout = QVBoxLayout(self.instructions_tab)
-        inst_layout.setContentsMargins(12, 12, 12, 12)
-        inst_layout.setSpacing(8)
-
-        self.recipe_instructions = QTextEdit()
-        self.recipe_instructions.setPlaceholderText("Write the recipe steps here...")
-        inst_layout.addWidget(self.recipe_instructions, 1)
-
-        # ----- add tabs ----- #
-        self.tabs.addTab(self.details_tab, "Details")
-        self.tabs.addTab(self.ingredients_tab, "Ingredients")
-        self.tabs.addTab(self.instructions_tab, "Instructions")
-
-        self.button = QPushButton("Save Changes" if self._edit_name else "Add Recipe")
+        # ── save button ─────────────────────────────────────── #
+        label = "Save Changes" if self._edit_name else "Add Recipe"
+        self.button = QPushButton(label)
         self.button.setProperty("btn", "primary")
-        self.button.setFixedHeight(38)
+        self.button.setFixedHeight(40)
+        self.button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
 
     def _populate_edit_data(self):
         doc = Recipe().get_recipe_details(self._edit_name)
@@ -264,8 +322,9 @@ class RecipesAdd(QWidget):
             name = ing.get("item_name", "")
             amount = ing.get("amount", 1)
             unit = ing.get("unit", "ea")
-            self.ingredients_list.append({"item_name": name, "amount": amount, "unit": unit})
-            self._add_selected_display(name, amount, unit)
+            nominal = ing.get("nominal", False)
+            self.ingredients_list.append({"item_name": name, "amount": amount, "unit": unit, "nominal": nominal})
+            self._add_selected_display(name, amount, unit, nominal=nominal)
 
     def _refresh_item_list(self):
         self.available_list.clear()
@@ -274,7 +333,29 @@ class RecipesAdd(QWidget):
             self.available_list.addItem(name)
 
     def add_layouts(self):
-        self.layout.addWidget(self.tabs, 1)
+        # apply stylesheet helpers to inner widgets
+        input_style = theme.input_css()
+        list_style = theme.list_widget_css()
+        cb_style = theme.checkbox_css()
+
+        for w in (self.recipe_name, self.recipe_tags, self.available_search,
+                  self.recipe_servings, self.unit_combo,
+                  self.amount_spin, self.amount_spin_float):
+            w.setStyleSheet(input_style)
+        self.recipe_instructions.setStyleSheet(input_style)
+
+        self.available_list.setStyleSheet(list_style)
+        self.selected_list.setStyleSheet(list_style)
+        self.nominal_cb.setStyleSheet(cb_style)
+        self.button.setStyleSheet(theme.button_css(primary=True))
+
+        # two-column body
+        body = QHBoxLayout()
+        body.setSpacing(12)
+        body.addWidget(self.left_panel, 5)
+        body.addWidget(self.right_panel, 6)
+
+        self.layout.addLayout(body, 1)
         self.layout.addWidget(self.button)
 
     def connections(self):
@@ -323,16 +404,16 @@ class RecipesAdd(QWidget):
         for name in names:
             name = name.strip()
             if name and not self._ingredient_exists(name):
-                self.ingredients_list.append({"item_name": name, "amount": 1, "unit": "ea"})
-                self._add_selected_display(name, 1, "ea")
+                self.ingredients_list.append({"item_name": name, "amount": 1, "unit": "ea", "nominal": False})
+                self._add_selected_display(name, 1, "ea", nominal=False)
 
     def on_add_ingredients(self):
         selected = self.available_list.selectedItems()
         for item in selected:
             name = item.text()
             if not self._ingredient_exists(name):
-                self.ingredients_list.append({"item_name": name, "amount": 1, "unit": "ea"})
-                self._add_selected_display(name, 1, "ea")
+                self.ingredients_list.append({"item_name": name, "amount": 1, "unit": "ea", "nominal": False})
+                self._add_selected_display(name, 1, "ea", nominal=False)
 
     def on_remove_ingredients(self):
         selected = self.selected_list.selectedItems()
@@ -344,8 +425,8 @@ class RecipesAdd(QWidget):
     def _on_available_double_click(self, item):
         name = item.text()
         if not self._ingredient_exists(name):
-            self.ingredients_list.append({"item_name": name, "amount": 1, "unit": "ea"})
-            self._add_selected_display(name, 1, "ea")
+            self.ingredients_list.append({"item_name": name, "amount": 1, "unit": "ea", "nominal": False})
+            self._add_selected_display(name, 1, "ea", nominal=False)
 
     def _on_selected_double_click(self, item):
         name = item.data(Qt.ItemDataRole.UserRole)
@@ -355,8 +436,10 @@ class RecipesAdd(QWidget):
     def _ingredient_exists(self, name):
         return any(i["item_name"] == name for i in self.ingredients_list)
 
-    def _add_selected_display(self, name, amount, unit):
-        if unit == "ea" and amount == 1:
+    def _add_selected_display(self, name, amount, unit, nominal=False):
+        if nominal:
+            display = f"~ {name}"
+        elif unit == "ea" and amount == 1:
             display = name
         else:
             amt = int(amount) if amount == int(amount) else amount
@@ -375,6 +458,7 @@ class RecipesAdd(QWidget):
                     if idx >= 0:
                         self.unit_combo.setCurrentIndex(idx)
                     self._set_current_amount(ing.get("amount", 1))
+                    self.nominal_cb.setChecked(ing.get("nominal", False))
                     break
 
     def on_set_qty(self):
@@ -385,14 +469,18 @@ class RecipesAdd(QWidget):
         name = current.data(Qt.ItemDataRole.UserRole)
         amount = self._get_current_amount()
         unit = self.unit_combo.currentText()
+        nominal = self.nominal_cb.isChecked()
 
         for ing in self.ingredients_list:
             if ing["item_name"] == name:
                 ing["amount"] = amount
                 ing["unit"] = unit
+                ing["nominal"] = nominal
                 break
 
-        if unit == "ea" and amount == 1:
+        if nominal:
+            display = f"~ {name}"
+        elif unit == "ea" and amount == 1:
             display = name
         else:
             amt = int(amount) if amount == int(amount) else amount
@@ -434,4 +522,3 @@ class RecipesAdd(QWidget):
         self.recipe_instructions.clear()
         self.ingredients_list = []
         self.selected_list.clear()
-        self.tabs.setCurrentIndex(0)

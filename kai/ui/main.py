@@ -9,7 +9,7 @@ from kai.ui import theme
 import sys
 from PySide6.QtWidgets import (
     QApplication, QWidget, QHBoxLayout, QVBoxLayout,
-    QMainWindow, QStackedWidget, QButtonGroup, QLabel, QComboBox
+    QMainWindow, QStackedWidget, QButtonGroup, QLabel, QComboBox, QPushButton
 )
 from PySide6.QtGui import QPixmap, QColor
 from PySide6.QtCore import Qt
@@ -72,7 +72,7 @@ class KaiUi(QMainWindow):
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
 
-        nav_items = ["Items", "Recipes", "Shopping List", "Settings"]
+        nav_items = ["Items", "Recipes", "Shopping List"]
         self.nav_buttons = []
 
         for i, label in enumerate(nav_items):
@@ -94,14 +94,49 @@ class KaiUi(QMainWindow):
         self.theme_combo.currentTextChanged.connect(self._on_theme_changed)
         self.sidebar_layout.addWidget(self.theme_combo)
 
+        # discrete settings button at the very bottom
+        self.settings_gear_btn = QPushButton("⚙  Settings")
+        self.settings_gear_btn.setCheckable(True)
+        self.settings_gear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.settings_gear_btn.setFixedHeight(32)
+        self.nav_group.addButton(self.settings_gear_btn, 3)
+        self.sidebar_layout.addSpacing(4)
+        self.sidebar_layout.addWidget(self.settings_gear_btn)
+
         self.nav_group.idClicked.connect(self.stack.setCurrentIndex)
         self.nav_buttons[0].setChecked(True)
+        self._apply_gear_style()
+
+    def _apply_gear_style(self):
+        t = theme.theme()
+        self.settings_gear_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {t.text_faint};
+                border: none;
+                border-radius: 8px;
+                padding: 6px 14px;
+                text-align: left;
+                font-size: 11px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {t.card};
+                color: {t.text_dim};
+            }}
+            QPushButton:checked {{
+                background-color: {t.card};
+                color: {t.text};
+                border-left: 3px solid {t.accent};
+            }}
+        """)
 
     def _on_theme_changed(self, name: str):
         theme.set_theme(name.lower())
         self.apply_theme()
         for btn in self.nav_buttons:
             btn.setStyleSheet(btn._build_style())
+        self._apply_gear_style()
         if hasattr(self, "settings_page"):
             self.settings_page.refresh_base_combo()
 
@@ -109,6 +144,7 @@ class KaiUi(QMainWindow):
         self.apply_theme()
         for btn in self.nav_buttons:
             btn.setStyleSheet(btn._build_style())
+        self._apply_gear_style()
         # rebuild theme combo
         self.theme_combo.blockSignals(True)
         self.theme_combo.clear()

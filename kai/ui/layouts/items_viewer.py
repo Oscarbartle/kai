@@ -79,14 +79,16 @@ class ItemsViewer(QWidget):
             if child.widget():
                 child.widget().deleteLater()
 
-        items_data = Item().get_items()
-        items_data.sort(key=lambda x: x[0])
+        item_obj = Item()
+        all_data = item_obj.io.all()
+        items_data = sorted(
+            ((v["name"], k, v) for k, v in all_data.items()),
+            key=lambda x: x[0]
+        )
 
-        for name, item_id in items_data:
-            if self.active_tag != "All":
-                details = Item().get_item_details(name)
-                if details and self.active_tag not in details.get("tags", []):
-                    continue
-            self.scroll_layout.addWidget(ItemDetails(name, self.state))
+        for name, item_id, doc in items_data:
+            if self.active_tag != "All" and self.active_tag not in (doc.get("tags") or []):
+                continue
+            self.scroll_layout.addWidget(ItemDetails(name, self.state, doc=doc))
 
         self.scroll_layout.addStretch()
