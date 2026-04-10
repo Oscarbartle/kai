@@ -5,9 +5,14 @@ from kai.core.io import IO
 from kai.core import settings
 
 class Recipe:
+    _migrated: set[str] = set()
+
     def __init__(self):
         self.io = IO(settings.data_dir() / "recipes.json")
-        self._migrate()
+        key = str(self.io.path)
+        if key not in Recipe._migrated:
+            self._migrate()
+            Recipe._migrated.add(key)
 
     def _migrate(self):
         """Migrate old {item_name, quantity} ingredients to {item_name, amount, unit}"""

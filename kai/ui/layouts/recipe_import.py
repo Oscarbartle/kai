@@ -9,10 +9,11 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QSpinBox, QDoubleSpinBox, QComboBox, QTextEdit, QScrollArea,
     QStackedWidget, QStyle, QStyleOption, QDialog, QCheckBox, QSizePolicy,
-    QApplication,
+    QApplication, QFrame,
 )
-from PySide6.QtGui import QPainter, QCursor
-from PySide6.QtCore import Qt
+from PySide6.QtGui import QPainter, QCursor, QColor
+from PySide6.QtCore import Qt, QSortFilterProxyModel, QStringListModel
+from PySide6.QtWidgets import QCompleter
 
 
 class IngredientRow(QWidget):
@@ -22,64 +23,73 @@ class IngredientRow(QWidget):
                  best_match: str | None = None):
         super().__init__()
         self.raw_text = raw_text
-        self._existing_items = existing_items
+        self._existing_items = list(existing_items)
+        self._omitted = False
 
         t = theme.theme()
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(10)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 10, 12, 10)
+        root.setSpacing(8)
 
-        # skip checkbox
-        self.skip_cb = QCheckBox()
-        self.skip_cb.setToolTip("Skip this ingredient")
-        self.skip_cb.toggled.connect(self._on_skip_toggled)
-        layout.addWidget(self.skip_cb)
+        # ── top row: raw text + omit button ──────────────────── #
+        top = QHBoxLayout()
+        top.setSpacing(8)
+        top.setContentsMargins(0, 0, 0, 0)
 
-        # left: raw text
-        left = QVBoxLayout()
-        left.setSpacing(2)
-        raw_label = QLabel(raw_text)
-        raw_label.setWordWrap(True)
-        raw_label.setStyleSheet(f"color: {t.text}; font-size: 12px;")
-        left.addWidget(raw_label)
-        layout.addLayout(left, 2)
+        self._raw_label = QLabel(raw_text)
+        self._raw_label.setWordWrap(True)
+        self._raw_label.setStyleSheet(f"color: {t.text}; font-size: 12px; font-weight: 600;")
+        top.addWidget(self._raw_label, 1)
 
-        # right: item picker + amount + unit
-        right = QVBoxLayout()
-        right.setSpacing(4)
+        self._omit_btn = QPushButton("Omit")
+        self._omit_btn.setFixedHeight(26)
+        self._omit_btn.setFixedWidth(56)
+        self._omit_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._omit_btn.setCheckable(True)
+        self._omit_btn.setToolTip("Exclude this ingredient from the recipe")
+        self._omit_btn.toggled.connect(self._on_omit_toggled)
+        top.addWidget(self._omit_btn)
 
-        # item combo
-        combo_row = QHBoxLayout()
-        combo_row.setSpacing(6)
+        root.addLayout(top)
+
+        # ── bottom row: item search + amount + unit + nominal ── #
+        self._controls = QWidget()
+        controls_layout = QHBoxLayout(self._controls)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setSpacing(8)
+
+        # searchable item combo
         self.item_combo = QComboBox()
+        self.item_combo.setEditable(True)
+        self.item_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.item_combo.lineEdit().setPlaceholderText("Search items…")
         self.item_combo.addItem("— None —")
         for name in sorted(existing_items):
             self.item_combo.addItem(name)
+
+        completer = QCompleter(sorted(existing_items), self)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.item_combo.setCompleter(completer)
+        self._completer = completer
+
         if best_match:
             idx = self.item_combo.findText(best_match)
             if idx >= 0:
                 self.item_combo.setCurrentIndex(idx)
-        self.item_combo.setSizePolicy(QSizePolicy.Policy.Expanding,
-                                       QSizePolicy.Policy.Fixed)
-        combo_row.addWidget(self.item_combo, 1)
+        self.item_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.item_combo.setFixedHeight(30)
+        controls_layout.addWidget(self.item_combo, 3)
 
-        self.add_item_btn = QPushButton("+ New Item")
-        self.add_item_btn.setFixedHeight(28)
-        self.add_item_btn.setProperty("btn", "secondary")
-        self.add_item_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        combo_row.addWidget(self.add_item_btn)
-        right.addLayout(combo_row)
-
-        # amount + unit row
-        qty_row = QHBoxLayout()
-        qty_row.setSpacing(6)
-
+        # amount spinbox (int / float stacked)
         self.amount_spin = QSpinBox()
         self.amount_spin.setMinimum(1)
         self.amount_spin.setMaximum(99999)
         self.amount_spin.setValue(1)
-        self.amount_spin.setFixedHeight(28)
+        self.amount_spin.setFixedHeight(30)
+        self.amount_spin.setFixedWidth(64)
 
         self.amount_spin_float = QDoubleSpinBox()
         self.amount_spin_float.setMinimum(0.1)
@@ -87,33 +97,105 @@ class IngredientRow(QWidget):
         self.amount_spin_float.setValue(1.0)
         self.amount_spin_float.setDecimals(1)
         self.amount_spin_float.setSingleStep(0.1)
-        self.amount_spin_float.setFixedHeight(28)
+        self.amount_spin_float.setFixedHeight(30)
+        self.amount_spin_float.setFixedWidth(64)
 
         self.amount_stack = QStackedWidget()
         self.amount_stack.addWidget(self.amount_spin)
         self.amount_stack.addWidget(self.amount_spin_float)
         self.amount_stack.setCurrentIndex(0)
-        qty_row.addWidget(self.amount_stack, 1)
+        self.amount_stack.setFixedWidth(64)
+        controls_layout.addWidget(self.amount_stack)
 
         self.unit_combo = QComboBox()
         self.unit_combo.addItems(["g", "kg", "mL", "L", "ea"])
         self.unit_combo.setCurrentText("ea")
-        self.unit_combo.setFixedHeight(28)
-        self.unit_combo.setMinimumWidth(58)
+        self.unit_combo.setFixedHeight(30)
+        self.unit_combo.setFixedWidth(62)
         self.unit_combo.currentTextChanged.connect(self._on_unit_changed)
-        qty_row.addWidget(self.unit_combo)
+        controls_layout.addWidget(self.unit_combo)
 
-        right.addLayout(qty_row)
+        # nominal checkbox
+        self.nominal_cb = QCheckBox("Nominal")
+        self.nominal_cb.setToolTip(
+            "Use when an exact amount doesn't matter (e.g. olive oil, salt).\n"
+            "Counted as 1 unit on shopping lists and excluded from cost totals."
+        )
+        self.nominal_cb.setFixedHeight(30)
+        self.nominal_cb.setStyleSheet(theme.checkbox_css())
+        self.nominal_cb.toggled.connect(self._on_nominal_toggled)
+        controls_layout.addWidget(self.nominal_cb)
 
-        layout.addLayout(right, 3)
+        # new item button
+        self.add_item_btn = QPushButton("+ New")
+        self.add_item_btn.setFixedHeight(30)
+        self.add_item_btn.setFixedWidth(58)
+        self.add_item_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        controls_layout.addWidget(self.add_item_btn)
 
-        self.setStyleSheet(f"""
-            QWidget {{
-                background: {t.card};
-                border: 1px solid {t.border};
-                border-radius: 6px;
-            }}
-        """)
+        root.addWidget(self._controls)
+
+        self._apply_style()
+
+    # ── style ─────────────────────────────────────────────────── #
+
+    def _apply_style(self):
+        t = theme.theme()
+        if self._omitted:
+            self.setStyleSheet(f"""
+                QWidget {{
+                    background: transparent;
+                    border: 1px solid {t.border};
+                    border-radius: 8px;
+                    opacity: 0.5;
+                }}
+            """)
+            self._omit_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {t.danger};
+                    color: white;
+                    border: none;
+                    border-radius: 5px;
+                    font-size: 11px;
+                    font-weight: bold;
+                }}
+            """)
+            self._raw_label.setStyleSheet(
+                f"color: {t.text_faint}; font-size: 12px; font-weight: 600;"
+                "text-decoration: line-through;"
+            )
+        else:
+            self.setStyleSheet(f"""
+                QWidget {{
+                    background: {t.card};
+                    border: 1px solid {t.border};
+                    border-radius: 8px;
+                }}
+            """)
+            self._omit_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {t.surface};
+                    color: {t.text_dim};
+                    border: 1px solid {t.border};
+                    border-radius: 5px;
+                    font-size: 11px;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{
+                    background: {t.danger};
+                    color: white;
+                    border-color: {t.danger};
+                }}
+            """)
+            self._raw_label.setStyleSheet(
+                f"color: {t.text}; font-size: 12px; font-weight: 600;"
+            )
+
+    def _on_omit_toggled(self, checked):
+        self._omitted = checked
+        self._omit_btn.setText("Omitted" if checked else "Omit")
+        self._controls.setEnabled(not checked)
+        self._apply_style()
 
     def _on_unit_changed(self, unit):
         if unit in ("kg", "L"):
@@ -123,45 +205,84 @@ class IngredientRow(QWidget):
             self.amount_spin.setValue(max(1, int(self.amount_spin_float.value())))
             self.amount_stack.setCurrentIndex(0)
 
-    def _on_skip_toggled(self, checked):
-        self.item_combo.setEnabled(not checked)
+    def _on_nominal_toggled(self, checked):
         self.amount_stack.setEnabled(not checked)
         self.unit_combo.setEnabled(not checked)
-        self.add_item_btn.setEnabled(not checked)
-        opacity = 0.4 if checked else 1.0
-        self.setStyleSheet(self.styleSheet())  # refresh
+
+    # ── public API ────────────────────────────────────────────── #
 
     def refresh_items(self, existing_items: list[str], auto_select: str | None = None):
-        """Refresh the item combo after a new item was added."""
+        """Refresh the item combo + completer after a new item was added."""
         current = self.item_combo.currentText()
         self.item_combo.clear()
         self.item_combo.addItem("— None —")
         for name in sorted(existing_items):
             self.item_combo.addItem(name)
+
+        self._completer.setModel(QStringListModel(sorted(existing_items), self._completer))
+        self._existing_items = list(existing_items)
+
         if auto_select:
             idx = self.item_combo.findText(auto_select)
             if idx >= 0:
                 self.item_combo.setCurrentIndex(idx)
-        elif current != "— None —":
+        elif current not in ("— None —", ""):
             idx = self.item_combo.findText(current)
             if idx >= 0:
                 self.item_combo.setCurrentIndex(idx)
 
-    def is_skipped(self) -> bool:
-        return self.skip_cb.isChecked()
+    def is_omitted(self) -> bool:
+        return self._omitted
 
     def get_data(self) -> dict | None:
-        if self.is_skipped():
+        if self._omitted:
             return None
-        item_name = self.item_combo.currentText()
-        if item_name == "— None —":
+        item_name = self.item_combo.currentText().strip()
+        if not item_name or item_name == "— None —":
             return None
+        nominal = self.nominal_cb.isChecked()
         unit = self.unit_combo.currentText()
+        if nominal:
+            return {"item_name": item_name, "amount": 1, "unit": "ea", "nominal": True}
         if unit in ("kg", "L"):
             amount = self.amount_spin_float.value()
         else:
             amount = self.amount_spin.value()
-        return {"item_name": item_name, "amount": amount, "unit": unit}
+        return {"item_name": item_name, "amount": amount, "unit": unit, "nominal": False}
+
+
+# ── step progress indicator ───────────────────────────────────── #
+
+class _StepDots(QWidget):
+    def __init__(self, count: int, parent=None):
+        super().__init__(parent)
+        self._count = count
+        self._current = 0
+        self.setFixedHeight(12)
+
+    def set_step(self, idx: int):
+        self._current = idx
+        self.update()
+
+    def paintEvent(self, event):
+        t = theme.theme()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        dot_r = 4
+        gap = 16
+        total_w = self._count * (dot_r * 2) + (self._count - 1) * gap
+        x = (self.width() - total_w) // 2
+        cy = self.height() // 2
+        for i in range(self._count):
+            cx = x + i * (dot_r * 2 + gap) + dot_r
+            if i == self._current:
+                p.setBrush(QColor(t.accent))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.drawEllipse(cx - dot_r, cy - dot_r, dot_r * 2, dot_r * 2)
+            else:
+                p.setBrush(QColor(t.border))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.drawEllipse(cx - dot_r + 1, cy - dot_r + 1, (dot_r - 1) * 2, (dot_r - 1) * 2)
 
 
 class RecipeImport(QWidget):
@@ -173,19 +294,32 @@ class RecipeImport(QWidget):
         self._scraped = None
         self._ingredient_rows: list[IngredientRow] = []
 
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(24, 20, 24, 20)
-        self.layout.setSpacing(12)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 16, 24, 20)
+        root.setSpacing(0)
+
+        # step dots
+        self._dots = _StepDots(3)
+        root.addWidget(self._dots)
+        root.addSpacing(12)
 
         self.stack = QStackedWidget()
-        self.layout.addWidget(self.stack, 1)
+        root.addWidget(self.stack, 1)
+        root.addSpacing(12)
+
+        # separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet(f"color: {theme.theme().border};")
+        root.addWidget(sep)
+        root.addSpacing(10)
 
         # nav buttons
         nav = QHBoxLayout()
         nav.setSpacing(8)
         self.back_btn = QPushButton("Back")
         self.back_btn.setProperty("btn", "secondary")
-        self.back_btn.setFixedHeight(38)
+        self.back_btn.setFixedHeight(36)
         self.back_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.back_btn.clicked.connect(self._go_back)
         nav.addWidget(self.back_btn)
@@ -194,12 +328,12 @@ class RecipeImport(QWidget):
 
         self.next_btn = QPushButton("Fetch Recipe")
         self.next_btn.setProperty("btn", "primary")
-        self.next_btn.setFixedHeight(38)
+        self.next_btn.setFixedHeight(36)
         self.next_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.next_btn.clicked.connect(self._go_next)
         nav.addWidget(self.next_btn)
 
-        self.layout.addLayout(nav)
+        root.addLayout(nav)
 
         self._build_step_url()
         self._build_step_details()
@@ -220,9 +354,7 @@ class RecipeImport(QWidget):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(14)
-
-        t = theme.theme()
+        layout.setSpacing(12)
 
         heading = QLabel("Import Recipe from URL")
         heading.setProperty("role", "heading")
@@ -233,7 +365,7 @@ class RecipeImport(QWidget):
         layout.addWidget(hint)
 
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("https://www.example.com/recipe/...")
+        self.url_input.setPlaceholderText("https://www.example.com/recipe/…")
         self.url_input.returnPressed.connect(self._go_next)
         layout.addWidget(self.url_input)
 
@@ -250,11 +382,13 @@ class RecipeImport(QWidget):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(14)
+        layout.setSpacing(10)
 
         heading = QLabel("Review Recipe Details")
         heading.setProperty("role", "heading")
         layout.addWidget(heading)
+
+        t = theme.theme()
 
         name_label = QLabel("Name")
         name_label.setProperty("role", "dim")
@@ -262,7 +396,9 @@ class RecipeImport(QWidget):
         self.detail_name = QLineEdit()
         layout.addWidget(self.detail_name)
 
-        servings_row = QHBoxLayout()
+        row2 = QHBoxLayout()
+        row2.setSpacing(16)
+
         servings_col = QVBoxLayout()
         servings_col.setSpacing(4)
         servings_label = QLabel("Servings")
@@ -272,16 +408,19 @@ class RecipeImport(QWidget):
         self.detail_servings.setMinimum(1)
         self.detail_servings.setFixedWidth(80)
         servings_col.addWidget(self.detail_servings)
-        servings_row.addLayout(servings_col)
-        servings_row.addStretch()
-        layout.addLayout(servings_row)
+        row2.addLayout(servings_col)
 
+        tags_col = QVBoxLayout()
+        tags_col.setSpacing(4)
         tags_label = QLabel("Tags")
         tags_label.setProperty("role", "dim")
-        layout.addWidget(tags_label)
+        tags_col.addWidget(tags_label)
         self.detail_tags = QLineEdit()
         self.detail_tags.setPlaceholderText("e.g. Dinner, Italian")
-        layout.addWidget(self.detail_tags)
+        tags_col.addWidget(self.detail_tags)
+        row2.addLayout(tags_col, 1)
+
+        layout.addLayout(row2)
 
         inst_label = QLabel("Instructions")
         inst_label.setProperty("role", "dim")
@@ -297,22 +436,38 @@ class RecipeImport(QWidget):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
+        header_row = QHBoxLayout()
         heading = QLabel("Match Ingredients")
         heading.setProperty("role", "heading")
-        layout.addWidget(heading)
+        header_row.addWidget(heading, 1)
+
+        self.ing_summary = QLabel("")
+        self.ing_summary.setProperty("role", "dim")
+        self.ing_summary.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        header_row.addWidget(self.ing_summary)
+        layout.addLayout(header_row)
 
         hint = QLabel(
-            "Map each ingredient to an existing item. "
-            "Set the amount and unit, or skip ingredients you don't need."
+            "Map each scraped ingredient to an item in your pantry. "
+            "Search by typing in the item box. Mark as Nominal if an exact amount doesn't matter, "
+            "or Omit to exclude it from the recipe."
         )
         hint.setProperty("role", "dim")
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
+        # filter bar
+        self._ing_search = QLineEdit()
+        self._ing_search.setPlaceholderText("Filter ingredients…")
+        self._ing_search.setFixedHeight(32)
+        self._ing_search.textChanged.connect(self._filter_rows)
+        layout.addWidget(self._ing_search)
+
         self.ing_scroll = QScrollArea()
         self.ing_scroll.setWidgetResizable(True)
+        self.ing_scroll.setStyleSheet(theme.scrollbar_css())
 
         self.ing_container = QWidget()
         self.ing_container.setStyleSheet("background: transparent;")
@@ -323,17 +478,13 @@ class RecipeImport(QWidget):
         self.ing_scroll.setWidget(self.ing_container)
         layout.addWidget(self.ing_scroll, 1)
 
-        # summary label
-        self.ing_summary = QLabel("")
-        self.ing_summary.setProperty("role", "dim")
-        layout.addWidget(self.ing_summary)
-
         self.stack.addWidget(page)
 
     # ── navigation ────────────────────────────────────────────── #
 
     def _update_nav(self):
         idx = self.stack.currentIndex()
+        self._dots.set_step(idx)
         self.back_btn.setVisible(idx > 0)
         labels = ["Fetch Recipe", "Next: Ingredients", "Import Recipe"]
         self.next_btn.setText(labels[min(idx, len(labels) - 1)])
@@ -373,7 +524,6 @@ class RecipeImport(QWidget):
             self.url_status.setText(str(e))
             return
 
-        # populate step 2
         self.detail_name.setText(self._scraped["title"])
         self.detail_servings.setValue(self._scraped["servings"])
         self.detail_instructions.setPlainText(self._scraped["instructions"])
@@ -388,7 +538,6 @@ class RecipeImport(QWidget):
         self._update_nav()
 
     def _populate_ingredients(self):
-        # clear old rows
         while self.ing_layout.count():
             child = self.ing_layout.takeAt(0)
             if child.widget():
@@ -406,49 +555,51 @@ class RecipeImport(QWidget):
             row.add_item_btn.clicked.connect(
                 lambda checked, r=row: self._open_add_item(r)
             )
+            row._omit_btn.toggled.connect(self._update_ingredient_summary)
+            row.item_combo.currentTextChanged.connect(self._update_ingredient_summary)
             self._ingredient_rows.append(row)
             self.ing_layout.addWidget(row)
 
         self.ing_layout.addStretch()
+        self._ing_search.clear()
         self._update_ingredient_summary()
+
+    def _filter_rows(self, text: str):
+        q = text.lower().strip()
+        for row in self._ingredient_rows:
+            row.setVisible(not q or q in row.raw_text.lower())
 
     def _update_ingredient_summary(self):
         total = len(self._ingredient_rows)
         mapped = sum(
             1 for r in self._ingredient_rows
-            if not r.is_skipped() and r.item_combo.currentText() != "— None —"
+            if not r.is_omitted() and r.item_combo.currentText().strip() not in ("— None —", "")
         )
-        skipped = sum(1 for r in self._ingredient_rows if r.is_skipped())
-        self.ing_summary.setText(
-            f"{mapped} of {total} ingredients mapped, {skipped} skipped"
-        )
+        omitted = sum(1 for r in self._ingredient_rows if r.is_omitted())
+        parts = [f"{mapped}/{total} mapped"]
+        if omitted:
+            parts.append(f"{omitted} omitted")
+        self.ing_summary.setText("  ·  ".join(parts))
 
     def _open_add_item(self, row: IngredientRow):
-        """Open the ItemsAdd dialog to create a new item, then refresh combos."""
+        """Open the ItemsAdd dialog; auto-select the newly created item."""
+        old_names = set(row._existing_items)
+
         dialog = QDialog(self)
         dialog.setWindowTitle("Add New Item")
         dialog.setMinimumSize(480, 420)
-
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(0, 0, 0, 0)
-
         items_add = ItemsAdd(self.state)
         layout.addWidget(items_add)
-
         dialog.exec()
 
-        # refresh all ingredient rows with updated item list
         new_existing = Item().get_item_names()
-        # find newly added items
-        old_names = set(row._existing_items)
         new_names = set(new_existing) - old_names
-
         auto_select = new_names.pop() if len(new_names) == 1 else None
 
         for r in self._ingredient_rows:
-            r.refresh_items(new_existing,
-                            auto_select=auto_select if r is row else None)
-            r._existing_items = new_existing
+            r.refresh_items(new_existing, auto_select=auto_select if r is row else None)
 
         self._update_ingredient_summary()
 
@@ -470,7 +621,6 @@ class RecipeImport(QWidget):
         Recipe().create(name, servings, tags, ingredients, instructions)
         self.state.recipes_updated()
 
-        # close parent dialog
         parent = self.parent()
         while parent:
             if hasattr(parent, "accept"):

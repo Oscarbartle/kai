@@ -1,5 +1,6 @@
 from kai.objects.item import Item
 from kai.ui import theme
+from kai.ui.refresh_worker import run_refresh
 
 from PySide6.QtWidgets import QLabel, QWidget, QHBoxLayout, QCheckBox, QPushButton, QStyle, QStyleOption
 from PySide6.QtGui import QPainter
@@ -117,4 +118,4 @@ class ShoppingItem(QWidget):
     def _on_refresh(self):
         name = self.item_data.get("item_name")
         if name:
-            Item().refresh_online_data(name)
+            run_refresh([name], parent=self)

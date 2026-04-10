@@ -2,6 +2,7 @@ from kai.objects.recipe import Recipe
 from kai.objects.item import Item
 from kai.objects.shopping_list import ShoppingList
 from kai.ui import theme
+from kai.ui.refresh_worker import run_refresh
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -75,11 +76,13 @@ class RecipeView(QWidget):
         root.addLayout(header)
 
         # ── cost bar ── #
-        cost, cost_full = self._calculate_cost()
+        cost, cost_full, cost_nominal = self._calculate_cost()
         if cost > 0:
             cost_text = f"Estimated cost: ${cost}"
             if cost_full != cost:
                 cost_text += f"  <span style='color:{t.text_dim};'>(${cost_full} w/LT)</span>"
+            if cost_nominal > 0:
+                cost_text += f"  <span style='color:{t.text_dim};'>+${cost_nominal} nom</span>"
             cost_label = QLabel(cost_text)
             cost_label.setStyleSheet(f"color: {t.accent}; font-size: 13px; font-weight: bold;")
             root.addWidget(cost_label)
@@ -113,7 +116,9 @@ class RecipeView(QWidget):
 
             # format line
             parts = []
-            if unit != "ea" or amount != 1:
+            if ing.get("nominal"):
+                parts.append("<i>~</i>")
+            elif unit != "ea" or amount != 1:
                 amt = int(amount) if amount == int(amount) else amount
                 parts.append(f"<b>{amt}{unit}</b>")
             parts.append(name)
@@ -131,8 +136,10 @@ class RecipeView(QWidget):
 
             price_str = f"  <span style='color:{t.text_faint};'>— ${price}</span>" if price else ""
             special_badge = f"  <span style='color:{t.success}; font-size:11px; font-weight:bold;'>SALE</span>" if is_on_special else ""
+            is_long_term = doc.get("is_long_term", False) if doc else False
+            lt_badge = f"  <span style='color:{t.text_dim}; font-size:10px;'>LT</span>" if is_long_term else ""
 
-            bullet_color = t.success if is_on_special else t.accent
+            bullet_color = t.success if is_on_special else (t.text_dim if is_long_term else t.accent)
 
             row_widget = QWidget()
             row_widget.setStyleSheet("background: transparent;")
@@ -140,7 +147,7 @@ class RecipeView(QWidget):
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(4)
 
-            row_label = QLabel(f"<span style='color:{bullet_color};'>\u2022</span>  {' '.join(parts)}{price_str}{special_badge}")
+            row_label = QLabel(f"<span style='color:{bullet_color};'>\u2022</span>  {' '.join(parts)}{price_str}{special_badge}{lt_badge}")
             row_label.setStyleSheet(f"color: {t.text}; font-size: 13px; padding: 6px 4px;")
             row_label.setWordWrap(True)
             row_layout.addWidget(row_label, 1)
@@ -244,10 +251,11 @@ class RecipeView(QWidget):
         entries = [{"recipe_name": self.name, "multiplier": 1}]
         items = sl.compute_items(entries, True)
         lt_items = sl.compute_long_term_items(entries)
+        nominal_items = sl.compute_nominal_items(entries)
         total = sum(it["price"] for it in items if it.get("price"))
         lt_total = sum(it["price"] for it in lt_items if it.get("price"))
-        return round(total, 2), round(total + lt_total, 2)
+        nominal_total = sum(it["price"] for it in nominal_items if it.get("price"))
+        return round(total, 2), round(total + lt_total, 2), round(nominal_total, 2)
 
     def _refresh_item(self, item_name: str):
-        Item().refresh_online_data(item_name)
-        self.data_refreshed.emit()
+        run_refresh([item_name], on_done=self.data_refreshed.emit, parent=self)

@@ -50,6 +50,8 @@ class ShoppingList:
                 item_name = ing.get("item_name", "")
                 if item_name in long_term_items:
                     continue
+                if ing.get("nominal"):
+                    continue
 
                 amount = ing.get("amount", 1) or 1
                 unit = ing.get("unit", "ea")
@@ -173,9 +175,12 @@ class ShoppingList:
                 if item_name not in long_term_names:
                     continue
 
-                amount = ing.get("amount", 1) or 1
-                unit = ing.get("unit", "ea")
-                base_amount, base_unit = _to_base(amount, unit)
+                if ing.get("nominal"):
+                    base_amount, base_unit = 1, "ea"
+                else:
+                    amount = ing.get("amount", 1) or 1
+                    unit = ing.get("unit", "ea")
+                    base_amount, base_unit = _to_base(amount, unit)
 
                 if item_name in aggregated:
                     prev = aggregated[item_name]
@@ -268,6 +273,32 @@ class ShoppingList:
             items.append(data)
 
         return items
+
+    def compute_nominal_items(self, recipe_entries: list):
+        """Compute items marked as nominal — always 1 unit each, excluded from main total."""
+        item_obj = Item()
+        recipe_obj = Recipe()
+
+        aggregated = {}
+        for entry in recipe_entries:
+            rname = entry["recipe_name"]
+            ingredients = recipe_obj.get_scaled_ingredients(rname, 1)
+
+            for ing in ingredients:
+                if not ing.get("nominal"):
+                    continue
+                item_name = ing.get("item_name", "")
+                if not item_name or item_name in aggregated:
+                    continue
+
+                price = item_obj.get_item_price(item_name, mode="per_unit")
+                aggregated[item_name] = {
+                    "item_name": item_name,
+                    "units_needed": 1,
+                    "price": round(float(price), 2) if price else None,
+                }
+
+        return list(aggregated.values())
 
     def generate(self, recipe_entries: list, exclude_long_term: bool = True, name: str = "", extra_items: list = None, lt_missing: list = None):
         """Generate and save a shopping list from recipes and extra items.

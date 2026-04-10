@@ -1,5 +1,5 @@
 from kai.objects.recipe import Recipe
-from ..widgets.recipe_details import RecipeDetails
+from ..widgets.recipe_details import RecipeDetails, invalidate_recipe_card_cache
 from ..widgets.recipe_view import RecipeView
 from kai.ui import theme
 
@@ -80,7 +80,10 @@ class RecipesViewer(QWidget):
         self.style().drawPrimitive(QStyle.PE_Widget, opt, p, self)
 
     def connections(self):
+        self.state.new_recipes.connect(invalidate_recipe_card_cache)
+        self.state.new_items.connect(invalidate_recipe_card_cache)
         self.state.new_recipes.connect(self.reload_recipes)
+        self.state.new_items.connect(self.reload_recipes)
         self.state.tag_selected.connect(self.on_tag_selected)
 
     def on_tag_selected(self, tag: str):

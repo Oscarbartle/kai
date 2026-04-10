@@ -11,6 +11,7 @@ _io = IO(_json_path)
 DEFAULTS = {
     "price_display_mode": "per_unit",  # "per_unit" or "per_weight"
     "data_dir": "",                     # empty ⇒ use local data/
+    "browser": "firefox",               # browser for Woolworths cart: firefox, chrome, edge, brave, chromium
 }
 
 
