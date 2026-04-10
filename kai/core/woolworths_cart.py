@@ -43,43 +43,113 @@ _FIREFOX_PATHS = [
     "~/AppData/Roaming/Mozilla/Firefox/Profiles/*/cookies.sqlite",
 ]
 
+_ZEN_PATHS = [
+    # macOS (Zen is Firefox-based)
+    "~/Library/Application Support/zen/Profiles/*/cookies.sqlite",
+    # Linux
+    "~/.zen/Profiles/*/cookies.sqlite",
+    # Windows
+    "~/AppData/Roaming/zen/Profiles/*/cookies.sqlite",
+]
+
 _CHROME_PATHS = [
     # macOS
     "~/Library/Application Support/Google/Chrome/Default/Cookies",
+    "~/Library/Application Support/Google/Chrome/Default/Network/Cookies",
+    "~/Library/Application Support/Google/Chrome/Profile */Cookies",
+    "~/Library/Application Support/Google/Chrome/Profile */Network/Cookies",
+    "~/Library/Application Support/Google/Chrome/*/Cookies",
+    "~/Library/Application Support/Google/Chrome/*/Network/Cookies",
     # Linux
     "~/.config/google-chrome/Default/Cookies",
+    "~/.config/google-chrome/Default/Network/Cookies",
+    "~/.config/google-chrome/Profile */Cookies",
+    "~/.config/google-chrome/Profile */Network/Cookies",
+    "~/.config/google-chrome/*/Cookies",
+    "~/.config/google-chrome/*/Network/Cookies",
     # Windows
     "~/AppData/Local/Google/Chrome/User Data/Default/Cookies",
+    "~/AppData/Local/Google/Chrome/User Data/Default/Network/Cookies",
+    "~/AppData/Local/Google/Chrome/User Data/Profile */Cookies",
+    "~/AppData/Local/Google/Chrome/User Data/Profile */Network/Cookies",
+    "~/AppData/Local/Google/Chrome/User Data/*/Cookies",
+    "~/AppData/Local/Google/Chrome/User Data/*/Network/Cookies",
 ]
 
 _BRAVE_PATHS = [
     # macOS
     "~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies",
+    "~/Library/Application Support/BraveSoftware/Brave-Browser/Default/Network/Cookies",
+    "~/Library/Application Support/BraveSoftware/Brave-Browser/Profile */Cookies",
+    "~/Library/Application Support/BraveSoftware/Brave-Browser/Profile */Network/Cookies",
+    "~/Library/Application Support/BraveSoftware/Brave-Browser/*/Cookies",
+    "~/Library/Application Support/BraveSoftware/Brave-Browser/*/Network/Cookies",
     # Linux
     "~/.config/BraveSoftware/Brave-Browser/Default/Cookies",
+    "~/.config/BraveSoftware/Brave-Browser/Default/Network/Cookies",
+    "~/.config/BraveSoftware/Brave-Browser/Profile */Cookies",
+    "~/.config/BraveSoftware/Brave-Browser/Profile */Network/Cookies",
+    "~/.config/BraveSoftware/Brave-Browser/*/Cookies",
+    "~/.config/BraveSoftware/Brave-Browser/*/Network/Cookies",
     # Windows
     "~/AppData/Local/BraveSoftware/Brave-Browser/User Data/Default/Cookies",
+    "~/AppData/Local/BraveSoftware/Brave-Browser/User Data/Default/Network/Cookies",
+    "~/AppData/Local/BraveSoftware/Brave-Browser/User Data/Profile */Cookies",
+    "~/AppData/Local/BraveSoftware/Brave-Browser/User Data/Profile */Network/Cookies",
+    "~/AppData/Local/BraveSoftware/Brave-Browser/User Data/*/Cookies",
+    "~/AppData/Local/BraveSoftware/Brave-Browser/User Data/*/Network/Cookies",
 ]
 
 _EDGE_PATHS = [
     # macOS
     "~/Library/Application Support/Microsoft Edge/Default/Cookies",
+    "~/Library/Application Support/Microsoft Edge/Default/Network/Cookies",
+    "~/Library/Application Support/Microsoft Edge/Profile */Cookies",
+    "~/Library/Application Support/Microsoft Edge/Profile */Network/Cookies",
+    "~/Library/Application Support/Microsoft Edge/*/Cookies",
+    "~/Library/Application Support/Microsoft Edge/*/Network/Cookies",
     # Linux
     "~/.config/microsoft-edge/Default/Cookies",
+    "~/.config/microsoft-edge/Default/Network/Cookies",
+    "~/.config/microsoft-edge/Profile */Cookies",
+    "~/.config/microsoft-edge/Profile */Network/Cookies",
+    "~/.config/microsoft-edge/*/Cookies",
+    "~/.config/microsoft-edge/*/Network/Cookies",
     # Windows
     "~/AppData/Local/Microsoft/Edge/User Data/Default/Cookies",
+    "~/AppData/Local/Microsoft/Edge/User Data/Default/Network/Cookies",
+    "~/AppData/Local/Microsoft/Edge/User Data/Profile */Cookies",
+    "~/AppData/Local/Microsoft/Edge/User Data/Profile */Network/Cookies",
+    "~/AppData/Local/Microsoft/Edge/User Data/*/Cookies",
+    "~/AppData/Local/Microsoft/Edge/User Data/*/Network/Cookies",
 ]
 
 _CHROMIUM_PATHS = [
     # macOS
     "~/Library/Application Support/Chromium/Default/Cookies",
+    "~/Library/Application Support/Chromium/Default/Network/Cookies",
+    "~/Library/Application Support/Chromium/Profile */Cookies",
+    "~/Library/Application Support/Chromium/Profile */Network/Cookies",
+    "~/Library/Application Support/Chromium/*/Cookies",
+    "~/Library/Application Support/Chromium/*/Network/Cookies",
     # Linux
     "~/.config/chromium/Default/Cookies",
+    "~/.config/chromium/Default/Network/Cookies",
+    "~/.config/chromium/Profile */Cookies",
+    "~/.config/chromium/Profile */Network/Cookies",
+    "~/.config/chromium/*/Cookies",
+    "~/.config/chromium/*/Network/Cookies",
     # Windows
     "~/AppData/Local/Chromium/User Data/Default/Cookies",
+    "~/AppData/Local/Chromium/User Data/Default/Network/Cookies",
+    "~/AppData/Local/Chromium/User Data/Profile */Cookies",
+    "~/AppData/Local/Chromium/User Data/Profile */Network/Cookies",
+    "~/AppData/Local/Chromium/User Data/*/Cookies",
+    "~/AppData/Local/Chromium/User Data/*/Network/Cookies",
 ]
 
 _BROWSER_PATHS: dict[str, list[str]] = {
+    "zen": _ZEN_PATHS,
     "firefox": _FIREFOX_PATHS,
     "chrome": _CHROME_PATHS,
     "brave": _BRAVE_PATHS,
@@ -101,7 +171,51 @@ def _find_cookie_file(browser: str) -> str | None:
 # ── Session creation ─────────────────────────────────────────────────────────
 
 def _is_firefox_based(browser: str) -> bool:
-    return browser == "firefox"
+    return browser in {"firefox", "zen"}
+
+
+def _browser_attempt_order(preferred: str | None) -> list[str]:
+    all_browsers = list(_BROWSER_PATHS.keys())
+    if preferred in _BROWSER_PATHS:
+        return [preferred] + [b for b in all_browsers if b != preferred]
+    return all_browsers
+
+
+def _session_for_browser(browser: str):
+    import browser_cookie3
+
+    cookie_file = _find_cookie_file(browser)
+    if cookie_file is None:
+        return None
+
+    try:
+        loaders = {
+            "zen": browser_cookie3.firefox,
+            "firefox": browser_cookie3.firefox,
+            "chrome": browser_cookie3.chrome,
+            "brave": browser_cookie3.brave,
+            "edge": browser_cookie3.edge,
+            "chromium": browser_cookie3.chromium,
+        }
+        loader = loaders.get(browser, browser_cookie3.chrome)
+        jar = loader(cookie_file=cookie_file)
+    except Exception:
+        return None
+
+    session = req_lib.Session()
+    session.cookies.update(jar)
+    session.headers.update(_HEADERS)
+    if not _has_woolworths_cookies(session):
+        return None
+    return session
+
+
+def _has_woolworths_cookies(session: req_lib.Session) -> bool:
+    for c in session.cookies:
+        domain = (c.domain or "").lstrip(".").lower()
+        if domain.endswith("woolworths.co.nz"):
+            return True
+    return False
 
 
 def get_session(browser: str | None = None) -> req_lib.Session | None:
@@ -109,33 +223,15 @@ def get_session(browser: str | None = None) -> req_lib.Session | None:
 
     Returns None if the cookie file cannot be found.
     """
-    import browser_cookie3
+    preferred = browser if browser is not None else (app_settings.get("browser") or "firefox")
 
-    if browser is None:
-        browser = app_settings.get("browser") or "firefox"
-
-    cookie_file = _find_cookie_file(browser)
-    if cookie_file is None:
-        return None
-
-    try:
-        if _is_firefox_based(browser):
-            jar = browser_cookie3.firefox(
-                cookie_file=cookie_file,
-                domain_name=".woolworths.co.nz",
-            )
-        else:
-            jar = browser_cookie3.chrome(
-                cookie_file=cookie_file,
-                domain_name=".woolworths.co.nz",
-            )
-    except Exception:
-        return None
-
-    session = req_lib.Session()
-    session.cookies.update(jar)
-    session.headers.update(_HEADERS)
-    return session
+    # Try selected browser first, then fall back to others in case the user
+    # authenticated in a different browser/profile.
+    for candidate in _browser_attempt_order(preferred):
+        session = _session_for_browser(candidate)
+        if session is not None:
+            return session
+    return None
 
 
 # ── Auth check ───────────────────────────────────────────────────────────────
@@ -151,8 +247,22 @@ _AUTH_COOKIE_INDICATORS = {
 
 def check_auth(session: req_lib.Session) -> bool:
     """Return True if the session has a valid Woolworths login (cookie-based check)."""
+    if not _has_woolworths_cookies(session):
+        return False
+
     cookie_names = {c.name for c in session.cookies}
-    return bool(cookie_names & _AUTH_COOKIE_INDICATORS)
+    if cookie_names & _AUTH_COOKIE_INDICATORS:
+        return True
+
+    # Cookie names can change; fall back to a lightweight auth probe.
+    try:
+        r = session.get(f"{BASE_URL}/api/v1/customers/my/profile", timeout=8)
+        if r.status_code == 200:
+            return True
+    except Exception:
+        pass
+
+    return False
 
 
 # ── Cart mutation ────────────────────────────────────────────────────────────

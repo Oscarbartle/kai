@@ -1,7 +1,7 @@
-from kai.ui.layouts.recipes_add import RecipesAdd
-from kai.ui.layouts.recipe_import import RecipeImport
+from kai.ui.layouts.recipes_add.page import RecipesAdd
+from kai.ui.layouts.recipe_import.page import RecipeImport
 from kai.ui.layouts.tags import Tags
-from kai.ui.layouts.recipes_viewer import RecipesViewer
+from kai.ui.layouts.recipes.viewer import RecipesViewer
 from kai.ui import theme
 
 from PySide6.QtWidgets import (

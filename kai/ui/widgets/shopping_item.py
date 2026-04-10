@@ -27,13 +27,18 @@ class ShoppingItem(QWidget):
 
     def set_stylesheet(self):
         t = theme.theme()
-        self.setStyleSheet(f"""
-            QWidget#shopping_item {{
-                background-color: {t.card};
-                border-radius: 6px;
-                border: 1px solid {t.border};
-            }}
-        """)
+        source_manual = bool(self.item_data.get("source_manual"))
+        source_recipe = bool(self.item_data.get("source_recipe"))
+        if source_manual and not source_recipe:
+            self.setStyleSheet(f"""
+                QWidget#shopping_item {{
+                    background-color: {t.warning}02;
+                    border-radius: 6px;
+                    border: 1px solid {t.border};
+                }}
+            """)
+            return
+        self.setStyleSheet(theme.inline_card_css("shopping_item", radius=6))
 
     def paintEvent(self, event):
         opt = QStyleOption()
@@ -57,18 +62,41 @@ class ShoppingItem(QWidget):
         self.name_label.setStyleSheet(style)
         self.layout.addWidget(self.name_label, 1)
 
+        source_recipe = bool(self.item_data.get("source_recipe"))
+        source_manual = bool(self.item_data.get("source_manual"))
+        manual_units = int(self.item_data.get("manual_units", 0) or 0)
+        is_highlighted = source_manual and not source_recipe
+
+        show_recipe_pill = source_recipe and not source_manual
+        if show_recipe_pill:
+            recipe_pill = QLabel("Recipe")
+            recipe_pill.setStyleSheet(theme.tag_pill_label_css(font_size=8))
+            recipe_pill.setToolTip("Added from recipe ingredients")
+            self.layout.addWidget(recipe_pill)
+
+        if source_manual:
+            badge_text = str(manual_units) if manual_units > 0 else "1"
+            manual_badge = QLabel(badge_text)
+            manual_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            manual_badge.setFixedSize(20, 20)
+            manual_badge.setStyleSheet(f"""
+                background-color: {t.warning}02;
+                color: {t.text};
+                border: 1px solid {t.accent}22;
+                border-radius: 10px;
+                font-size: 11px;
+                font-weight: bold;
+            """)
+            manual_badge.setToolTip(
+                f"Individually added x{manual_units}" if manual_units > 0 else "Individually added"
+            )
+            self.layout.addWidget(manual_badge)
+
         # tag pills
         tags = self.item_data.get("tags", [])
         for tag in tags:
             pill = QLabel(tag)
-            pill.setStyleSheet(f"""
-                background-color: {t.surface};
-                color: {t.text_dim};
-                border: 1px solid {t.border};
-                border-radius: 8px;
-                padding: 1px 6px;
-                font-size: 9px;
-            """)
+            pill.setStyleSheet(theme.tag_pill_label_css())
             self.layout.addWidget(pill)
 
         # units to buy
@@ -97,13 +125,9 @@ class ShoppingItem(QWidget):
         self.refresh_button.setFixedSize(22, 22)
         self.refresh_button.setToolTip(f"Refresh {name}")
         self.refresh_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.refresh_button.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent; color: {t.text_faint};
-                border: none; font-size: 13px; border-radius: 4px;
-            }}
-            QPushButton:hover {{ background: {t.accent}22; color: {t.accent}; }}
-        """)
+        self.refresh_button.setStyleSheet(
+            theme.icon_btn_css("#ffffff") if is_highlighted else theme.icon_btn_css()
+        )
         self.refresh_button.clicked.connect(self._on_refresh)
         self.layout.addWidget(self.refresh_button)
 

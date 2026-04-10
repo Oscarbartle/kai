@@ -1,6 +1,6 @@
-from kai.ui.layouts.items_add import ItemsAdd
+from kai.ui.layouts.items.add import ItemsAdd
 from kai.ui.layouts.tags import Tags
-from kai.ui.layouts.items_viewer import ItemsViewer
+from kai.ui.layouts.items.viewer import ItemsViewer
 from kai.ui import theme
 
 from PySide6.QtWidgets import (

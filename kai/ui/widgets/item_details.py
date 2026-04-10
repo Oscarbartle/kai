@@ -194,27 +194,14 @@ class ItemDetails(QWidget):
         self.refresh_button.setFixedSize(22, 22)
         self.refresh_button.setToolTip("Refresh Woolworths data")
         self.refresh_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.refresh_button.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent; color: {t.text_faint};
-                border: none; font-size: 14px; font-weight: bold;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{ background: {t.accent}22; color: {t.accent}; }}
-        """)
+        self.refresh_button.setStyleSheet(theme.icon_btn_css())
         self.refresh_button.clicked.connect(self._on_refresh)
 
         self.delete_button = QPushButton("\u2715")
         self.delete_button.setFixedSize(22, 22)
         self.delete_button.setToolTip("Delete item")
         self.delete_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.delete_button.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent; color: {t.text_faint};
-                border: none; font-size: 14px; font-weight: bold;
-            }}
-            QPushButton:hover {{ color: {t.danger}; background: {t.danger}22; border-radius: 4px; }}
-        """)
+        self.delete_button.setStyleSheet(theme.delete_btn_css(font_size=14))
         self.delete_button.clicked.connect(self._on_delete)
 
         if self.is_special:
@@ -280,11 +267,7 @@ class ItemDetails(QWidget):
     def contextMenuEvent(self, event):
         p = theme._active
         menu = QMenu(self)
-        menu.setStyleSheet(
-            f"QMenu {{ background:{p.surface}; color:{p.text}; border:1px solid {p.border}; padding:4px; }}"
-            f"QMenu::item {{ padding:6px 24px 6px 12px; border-radius:4px; }}"
-            f"QMenu::item:selected {{ background:{p.accent}; color:{p.accent_fg}; }}"
-        )
+        menu.setStyleSheet(theme.context_menu_css())
         edit_action = QAction("Edit Item", self)
         edit_action.triggered.connect(self._open_edit_dialog)
         menu.addAction(edit_action)
@@ -300,7 +283,7 @@ class ItemDetails(QWidget):
         QDesktopServices.openUrl(url)
 
     def _open_edit_dialog(self):
-        from kai.ui.layouts.items_add import ItemsAdd
+        from kai.ui.layouts.items.add import ItemsAdd
 
         dialog = QDialog(self.window())
         dialog.setWindowTitle(f"Edit — {self.name}")

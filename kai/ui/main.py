@@ -1,7 +1,7 @@
-from kai.ui.layouts.items_page import ItemsPage
-from kai.ui.layouts.recipes_page import RecipesPage
-from kai.ui.layouts.shopping_list_page import ShoppingListPage
-from kai.ui.layouts.settings_page import SettingsPage
+from kai.ui.layouts.items.page import ItemsPage
+from kai.ui.layouts.recipes.page import RecipesPage
+from kai.ui.layouts.shopping_list.page import ShoppingListPage
+from kai.ui.layouts.settings.page import SettingsPage
 from kai.ui.widgets.nav_button import NavButton
 from kai.ui.state import State
 from kai.ui import theme
@@ -61,11 +61,11 @@ class KaiUi(QMainWindow):
         logo_label = QLabel()
         pixmap = QPixmap(str(logo_path))
         dpr = self.screen().devicePixelRatio() if self.screen() else 1
-        scaled = pixmap.scaledToWidth(int(100 * dpr), Qt.TransformationMode.SmoothTransformation)
+        scaled = pixmap.scaledToWidth(int(80 * dpr), Qt.TransformationMode.SmoothTransformation)
         scaled.setDevicePixelRatio(dpr)
         logo_label.setPixmap(scaled)
         logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo_label.setStyleSheet("padding-bottom: 15px 0;")
+        logo_label.setStyleSheet("padding-top: 5px 0; padding-bottom: 15px 0;")
 
         self.sidebar_layout.addWidget(logo_label)
  

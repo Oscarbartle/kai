@@ -1,6 +1,6 @@
 from kai.objects.recipe import Recipe
-from ..widgets.recipe_details import RecipeDetails, invalidate_recipe_card_cache
-from ..widgets.recipe_view import RecipeView
+from kai.ui.widgets.recipe_details import RecipeDetails, invalidate_recipe_card_cache
+from kai.ui.widgets.recipe_view import RecipeView
 from kai.ui import theme
 
 from PySide6.QtWidgets import QLabel, QWidget, QVBoxLayout, QHBoxLayout, QStyle, QStyleOption, QScrollArea, QStackedWidget, QPushButton

@@ -32,5 +32,4 @@ class State(QObject):
         self.new_shopping_list.emit()
 
     def select_tag(self, tag: str):
-        print(f"STATE: tag selected: {tag}")
         self.tag_selected.emit(tag)

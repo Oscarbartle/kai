@@ -499,24 +499,184 @@ def label_css(role: str = "body") -> str:
     return styles.get(role, styles["body"])
 
 
+# ── new reusable fragments ────────────────────────────────────────── #
+
+def section_label_css() -> str:
+    """CSS for section header labels (uppercase, letter-spaced)."""
+    t = theme()
+    return (
+        f"color: {t.text_dim}; font-size: 10px; font-weight: 700; "
+        "letter-spacing: 0.8px; text-transform: uppercase;"
+    )
+
+
+def divider_line_css() -> str:
+    """CSS for a 1-pixel horizontal QFrame divider."""
+    t = theme()
+    return f"background: {t.border}; border: none; max-height: 1px;"
+
+
+def inline_card_css(object_name: str, *, radius: int = 10) -> str:
+    """CSS for an inline card panel widget (card bg + border)."""
+    t = theme()
+    return f"""
+        QWidget#{object_name} {{
+            background-color: {t.card};
+            border: 1px solid {t.border};
+            border-radius: {radius}px;
+        }}
+    """
+
+
+def surface_row_css(object_name: str, *, radius: int = 6) -> str:
+    """CSS for a surface-coloured row widget (lighter than card)."""
+    t = theme()
+    return f"""
+        QWidget#{object_name} {{
+            background-color: {t.surface};
+            border-radius: {radius}px;
+            border: 1px solid {t.border};
+        }}
+    """
+
+
+def delete_btn_css(*, font_size: int = 13) -> str:
+    """CSS for a small × delete button — danger colour and bg on hover."""
+    t = theme()
+    return f"""
+        QPushButton {{
+            background: transparent;
+            color: {t.text_faint};
+            border: none;
+            font-size: {font_size}px;
+            font-weight: bold;
+        }}
+        QPushButton:hover {{
+            color: {t.danger};
+            background: {t.danger}22;
+            border-radius: 4px;
+        }}
+    """
+
+
+def remove_btn_css(*, font_size: int = 11) -> str:
+    """CSS for a tiny × chip-remove button — only danger text on hover."""
+    t = theme()
+    return f"""
+        QPushButton {{
+            background: transparent;
+            color: {t.text_faint};
+            border: none;
+            font-size: {font_size}px;
+        }}
+        QPushButton:hover {{ color: {t.danger}; }}
+    """
+
+
+def icon_btn_css(color: str | None = None) -> str:
+    """CSS for a ghost icon button (refresh, fav) — accent on hover."""
+    t = theme()
+    fg = color if color is not None else t.text_faint
+    return f"""
+        QPushButton {{
+            background: transparent;
+            color: {fg};
+            border: none;
+            font-size: 14px;
+            font-weight: bold;
+            border-radius: 4px;
+        }}
+        QPushButton:hover {{
+            background: {t.accent}22;
+            color: {t.accent};
+        }}
+    """
+
+
+def badge_css(bg: str, fg: str) -> str:
+    """CSS for a round count QLabel badge."""
+    return f"""
+        background-color: {bg};
+        color: {fg};
+        border-radius: 11px;
+        font-size: 11px;
+        font-weight: bold;
+    """
+
+
+def mini_primary_btn_css(*, radius: int = 6, font_size: int = 13) -> str:
+    """CSS for a compact primary action button (e.g. Add)."""
+    t = theme()
+    return f"""
+        QPushButton {{
+            background-color: {t.btn_bg};
+            color: {t.btn_fg};
+            border: none;
+            border-radius: {radius}px;
+            font-size: {font_size}px;
+            font-weight: bold;
+        }}
+        QPushButton:hover {{ background-color: {t.btn_hover}; }}
+        QPushButton:pressed {{ background-color: {t.btn_pressed}; }}
+    """
+
+
+def collapsible_btn_css() -> str:
+    """CSS for a collapsible section toggle button."""
+    t = theme()
+    return f"""
+        QPushButton {{
+            background-color: {t.surface};
+            color: {t.text};
+            border: none;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: bold;
+            text-align: left;
+            padding-left: 4px;
+        }}
+        QPushButton:hover {{ background-color: {t.border}; }}
+    """
+
+
+def context_menu_css() -> str:
+    """CSS for a QMenu context menu."""
+    t = theme()
+    return (
+        f"QMenu {{ background: {t.surface}; color: {t.text}; "
+        f"border: 1px solid {t.border}; padding: 4px; }}"
+        f"QMenu::item {{ padding: 6px 24px 6px 12px; border-radius: 4px; }}"
+        f"QMenu::item:selected {{ background: {t.accent}; color: {t.accent_fg}; }}"
+    )
+
+
+def tag_pill_label_css(*, font_size: int = 9) -> str:
+    """CSS for a non-interactive inline tag label pill (QLabel)."""
+    t = theme()
+    return f"""
+        background-color: {t.surface};
+        color: {t.text_dim};
+        border: 1px solid {t.border};
+        border-radius: 8px;
+        padding: 1px 6px;
+        font-size: {font_size}px;
+    """
+
+
 # ── global stylesheet (applied once on QMainWindow) ──────────────── #
 
-def global_stylesheet() -> str:
-    t = theme()
+def _gs_base(t) -> str:
     return f"""
         QMainWindow {{
             background-color: {t.bg};
         }}
-
         QWidget {{
             font-family: {_platform_font()};
         }}
-
         QLabel {{
             color: {t.text};
             background: transparent;
         }}
-
         QToolTip {{
             background-color: {t.card};
             color: {t.text};
@@ -525,25 +685,25 @@ def global_stylesheet() -> str:
             padding: 6px 8px;
             font-size: 11px;
         }}
+    """
 
-        {input_css()}
 
-        {checkbox_css()}
-
-        {scrollbar_css()}
-
+def _gs_layout(t) -> str:
+    return f"""
         QWidget#sidebar {{
             background-color: {t.surface};
             border-right: 1px solid {t.border};
         }}
-
         QWidget#page_panel {{
             background-color: {t.surface};
             border-radius: 10px;
             border: 1px solid {t.border};
         }}
+    """
 
-        /* ── label roles ─────────────────────────────────────── */
+
+def _gs_label_roles(t) -> str:
+    return f"""
         QLabel[role="heading"] {{
             color: {t.text};
             font-size: 15px;
@@ -586,8 +746,11 @@ def global_stylesheet() -> str:
             font-weight: bold;
             padding: 4px 8px 16px 8px;
         }}
+    """
 
-        /* ── buttons ─────────────────────────────────────────── */
+
+def _gs_buttons(t) -> str:
+    return f"""
         QPushButton[btn="primary"] {{
             background-color: {t.btn_bg};
             color: {t.btn_fg};
@@ -616,8 +779,11 @@ def global_stylesheet() -> str:
             background-color: {t.border};
             color: {t.text};
         }}
+    """
 
-        /* ── list widgets ────────────────────────────────────── */
+
+def _gs_list_widget(t) -> str:
+    return f"""
         QListWidget {{
             background-color: {t.bg};
             border: 1px solid {t.border};
@@ -638,8 +804,11 @@ def global_stylesheet() -> str:
         QListWidget::item:hover:!selected {{
             background-color: {t.border}66;
         }}
+    """
 
-        /* ── page-level tabs (top, left-aligned) ─────────────── */
+
+def _gs_tabs(t) -> str:
+    return f"""
         QTabWidget[tab="page"]::pane {{
             border: none;
             background: transparent;
@@ -669,8 +838,6 @@ def global_stylesheet() -> str:
             background: {t.card};
             color: {t.text};
         }}
-
-        /* ── inner form tabs ─────────────────────────────────── */
         QTabWidget[tab="inner"]::pane {{
             border: 1px solid {t.border};
             border-radius: 8px;
@@ -697,14 +864,20 @@ def global_stylesheet() -> str:
             background: {t.surface};
             color: {t.text};
         }}
+    """
 
-        /* ── scroll areas ────────────────────────────────────── */
-        QScrollArea {{
+
+def _gs_scroll_area() -> str:
+    return """
+        QScrollArea {
             background: transparent;
             border: none;
-        }}
+        }
+    """
 
-        /* ── tag chips ───────────────────────────────────────── */
+
+def _gs_chips(t) -> str:
+    return f"""
         QPushButton[btn="chip"] {{
             background: {t.card};
             color: {t.text_dim};
@@ -718,10 +891,31 @@ def global_stylesheet() -> str:
             color: {t.list_hl_fg};
             border-color: {t.list_hl_fg};
         }}
+    """
 
-        /* ── dialogs ─────────────────────────────────────────── */
+
+def _gs_dialog(t) -> str:
+    return f"""
         QDialog {{
             background-color: {t.surface};
             border: 1px solid {t.border};
         }}
     """
+
+
+def global_stylesheet() -> str:
+    t = theme()
+    return (
+        _gs_base(t)
+        + input_css()
+        + checkbox_css()
+        + scrollbar_css()
+        + _gs_layout(t)
+        + _gs_label_roles(t)
+        + _gs_buttons(t)
+        + _gs_list_widget(t)
+        + _gs_tabs(t)
+        + _gs_scroll_area()
+        + _gs_chips(t)
+        + _gs_dialog(t)
+    )

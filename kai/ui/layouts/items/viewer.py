@@ -1,5 +1,5 @@
 from kai.objects.item import Item
-from ..widgets.item_details import ItemDetails
+from kai.ui.widgets.item_details import ItemDetails
 from kai.ui import theme
 
 from PySide6.QtWidgets import QLabel, QWidget, QVBoxLayout, QHBoxLayout, QStyle, QStyleOption, QScrollArea, QPushButton

@@ -1,5 +1,6 @@
 from kai.objects.item import Item
 from kai.ui import theme
+from kai.ui.widgets.tag_pill import TagChip
 
 from PySide6.QtWidgets import (
     QWidget, QStyle, QStyleOption, QPushButton, QVBoxLayout, QHBoxLayout,
@@ -7,18 +8,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QPainter, QCursor
 from PySide6.QtCore import Qt
-
-
-class TagChip(QPushButton):
-    """Clickable tag pill that appends its text to the tags input."""
-
-    def __init__(self, tag_name, on_click):
-        super().__init__(tag_name)
-        self._tag = tag_name
-        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.setFixedHeight(26)
-        self.setProperty("btn", "chip")
-        self.clicked.connect(lambda: on_click(self._tag))
 
 
 class ItemsAdd(QWidget):
@@ -46,19 +35,14 @@ class ItemsAdd(QWidget):
         self.style().drawPrimitive(QStyle.PE_Widget, opt, p, self)
 
     def _section_label(self, text: str) -> QLabel:
-        t = theme.theme()
         lbl = QLabel(text)
-        lbl.setStyleSheet(
-            f"color: {t.text_dim}; font-size: 10px; font-weight: 700; "
-            f"letter-spacing: 0.8px; text-transform: uppercase;"
-        )
+        lbl.setStyleSheet(theme.section_label_css())
         return lbl
 
     def _divider(self) -> QFrame:
-        t = theme.theme()
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
-        line.setStyleSheet(f"background: {t.border}; border: none; max-height: 1px;")
+        line.setStyleSheet(theme.divider_line_css())
         return line
 
     def create_widgets(self):
@@ -66,13 +50,7 @@ class ItemsAdd(QWidget):
 
         self.card = QWidget()
         self.card.setObjectName("item_add_card")
-        self.card.setStyleSheet(f"""
-            QWidget#item_add_card {{
-                background: {t.card};
-                border: 1px solid {t.border};
-                border-radius: 10px;
-            }}
-        """)
+        self.card.setStyleSheet(theme.inline_card_css("item_add_card"))
         card_layout = QVBoxLayout(self.card)
         card_layout.setContentsMargins(16, 16, 16, 16)
         card_layout.setSpacing(12)
@@ -169,12 +147,9 @@ class ItemsAdd(QWidget):
             self.item_tags.setText(", ".join(existing))
 
     def add_layouts(self):
-        input_style = theme.input_css()
-        cb_style = theme.checkbox_css()
-
         for w in (self.item_name, self.item_stock_code, self.item_tags):
-            w.setStyleSheet(input_style)
-        self.long_term_cb.setStyleSheet(cb_style)
+            w.setStyleSheet(theme.input_css())
+        self.long_term_cb.setStyleSheet(theme.checkbox_css())
         self.button.setStyleSheet(theme.button_css(primary=True))
 
         self.layout.addWidget(self.card, 1)

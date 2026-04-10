@@ -156,13 +156,7 @@ class RecipeView(QWidget):
             refresh_btn.setFixedSize(22, 22)
             refresh_btn.setToolTip(f"Refresh {name}")
             refresh_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-            refresh_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: transparent; color: {t.text_faint};
-                    border: none; font-size: 13px; border-radius: 4px;
-                }}
-                QPushButton:hover {{ background: {t.accent}22; color: {t.accent}; }}
-            """)
+            refresh_btn.setStyleSheet(theme.icon_btn_css())
             refresh_btn.clicked.connect(lambda checked, n=name: self._refresh_item(n))
             row_layout.addWidget(refresh_btn)
 
@@ -175,13 +169,7 @@ class RecipeView(QWidget):
         # wrap in a card
         ing_card = QWidget()
         ing_card.setObjectName("ing_card")
-        ing_card.setStyleSheet(f"""
-            QWidget#ing_card {{
-                background: {t.card};
-                border: 1px solid {t.border};
-                border-radius: 10px;
-            }}
-        """)
+        ing_card.setStyleSheet(theme.inline_card_css("ing_card"))
         ing_card_layout = QVBoxLayout(ing_card)
         ing_card_layout.setContentsMargins(12, 12, 12, 12)
         ing_card_layout.setSpacing(0)
@@ -194,13 +182,7 @@ class RecipeView(QWidget):
         # ── right: instructions ── #
         inst_card = QWidget()
         inst_card.setObjectName("inst_card")
-        inst_card.setStyleSheet(f"""
-            QWidget#inst_card {{
-                background: {t.card};
-                border: 1px solid {t.border};
-                border-radius: 10px;
-            }}
-        """)
+        inst_card.setStyleSheet(theme.inline_card_css("inst_card"))
         inst_card_layout = QVBoxLayout(inst_card)
         inst_card_layout.setContentsMargins(12, 12, 12, 12)
         inst_card_layout.setSpacing(8)
