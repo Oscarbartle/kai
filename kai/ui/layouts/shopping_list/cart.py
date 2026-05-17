@@ -364,12 +364,8 @@ class ShoppingListCartMixin:
             self.cart_layout.addStretch()
             self.save_button.setEnabled(True)
             self.clear_button.setEnabled(True)
-<<<<<<< Updated upstream
-            self._autosave_timer.start()  # restart debounce on every change
-=======
             if not self._suppress_autosave:
                 self._autosave_timer.start()  # restart debounce on every change
->>>>>>> Stashed changes
 
         self._auto_render()
         self._save_draft()
