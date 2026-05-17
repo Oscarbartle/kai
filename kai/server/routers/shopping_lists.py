@@ -4,6 +4,8 @@ from typing import Annotated
 from kai.objects.shopping_list import ShoppingList
 from kai.server.schemas import (
     ShoppingListGenerate,
+    ShoppingListCreate,
+    FreeformItemAdd,
     ShoppingListResponse,
     ShoppingListSummary,
 )
@@ -28,6 +30,16 @@ def list_shopping_lists():
         )
         for name, lid, date in obj.get_all_lists()
     ]
+
+
+@router.post("", response_model=ShoppingListResponse, status_code=201)
+def create_freeform_list(body: ShoppingListCreate, response: Response):
+    """Create a new named freeform shopping list."""
+    obj = ShoppingList()
+    list_id = obj.create_freeform(body.name)
+    data = obj.get_list(list_id)
+    response.headers["ETag"] = f'"{record_etag(data)}"'
+    return _list_response(list_id, data)
 
 
 @router.post("/generate", response_model=ShoppingListResponse, status_code=201)
@@ -84,6 +96,71 @@ def toggle_purchased(
         raise HTTPException(status_code=404, detail="Shopping list not found.")
     check_etag(data, if_match)
     obj.mark_purchased(list_id, item_name, purchased)
+    updated = obj.get_list(list_id)
+    response.headers["ETag"] = f'"{record_etag(updated)}"'
+    return _list_response(list_id, updated)
+
+
+@router.post("/{list_id}/items", response_model=ShoppingListResponse, status_code=201)
+def add_item_to_freeform(
+    list_id: str,
+    body: FreeformItemAdd,
+    response: Response,
+    if_match: Annotated[str | None, Header()] = None,
+):
+    """Add an item to a freeform list. Unrecognised items are flagged with recognised=False."""
+    obj = ShoppingList()
+    data = obj.get_list(list_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Shopping list not found.")
+    if data.get("type") != "freeform":
+        raise HTTPException(status_code=400, detail="Items can only be added to freeform lists.")
+    check_etag(data, if_match)
+    obj.freeform_add_item(list_id, body.item_name)
+    updated = obj.get_list(list_id)
+    response.headers["ETag"] = f'"{record_etag(updated)}"'
+    return _list_response(list_id, updated)
+
+
+@router.delete("/{list_id}/items/{item_name}", response_model=ShoppingListResponse)
+def remove_item_from_freeform(
+    list_id: str,
+    item_name: str,
+    response: Response,
+    if_match: Annotated[str | None, Header()] = None,
+):
+    """Remove an item from a freeform list."""
+    obj = ShoppingList()
+    data = obj.get_list(list_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Shopping list not found.")
+    if data.get("type") != "freeform":
+        raise HTTPException(status_code=400, detail="Items can only be removed from freeform lists.")
+    check_etag(data, if_match)
+    ok = obj.freeform_remove_item(list_id, item_name)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Item '{item_name}' not found in list.")
+    updated = obj.get_list(list_id)
+    response.headers["ETag"] = f'"{record_etag(updated)}"'
+    return _list_response(list_id, updated)
+
+
+@router.post("/{list_id}/items/{item_name}/link", response_model=ShoppingListResponse)
+def link_item(
+    list_id: str,
+    item_name: str,
+    response: Response,
+    if_match: Annotated[str | None, Header()] = None,
+):
+    """Re-resolve an unrecognised item against the pantry (call after adding it to items)."""
+    obj = ShoppingList()
+    data = obj.get_list(list_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Shopping list not found.")
+    check_etag(data, if_match)
+    ok = obj.freeform_link_item(list_id, item_name)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Item '{item_name}' not found in pantry.")
     updated = obj.get_list(list_id)
     response.headers["ETag"] = f'"{record_etag(updated)}"'
     return _list_response(list_id, updated)

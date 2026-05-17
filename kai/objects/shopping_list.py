@@ -304,6 +304,7 @@ class ShoppingList:
             for e in recipe_entries
         ]
         self.io.create(list_id, {
+            "type": "generated",
             "name": name or ", ".join(recipe_names),
             "recipes": recipe_names,
             "recipe_entries": recipe_entries,
@@ -313,6 +314,88 @@ class ShoppingList:
             "date_generated": datetime.now().isoformat(),
         }, overwrite=True)
         return list_id
+
+    def create_freeform(self, name: str) -> str:
+        """Create a named freeform shopping list and return its ID."""
+        list_id = str(uuid.uuid4())
+        self.io.create(list_id, {
+            "type": "freeform",
+            "name": name,
+            "items": [],
+            "date_generated": datetime.now().isoformat(),
+        }, overwrite=True)
+        return list_id
+
+    def freeform_add_item(self, list_id: str, item_name: str) -> bool:
+        """Add an item to a freeform list.  Returns False if list not found.
+
+        If item_name exists in the pantry, metadata (price, tags) is attached.
+        Unknown items are added with recognised=False so clients can flag them.
+        """
+        data = self.io.all()
+        if list_id not in data:
+            return False
+
+        item_obj = Item()
+        details = item_obj.get_item_details(item_name)
+
+        if details:
+            price = item_obj.get_item_price(item_name, mode="per_unit")
+            entry = {
+                "item_name": item_name,
+                "purchased": False,
+                "recognised": True,
+                "tags": details.get("tags", []),
+                "unit_price": float(price) if price else None,
+            }
+        else:
+            entry = {
+                "item_name": item_name,
+                "purchased": False,
+                "recognised": False,
+                "tags": [],
+                "unit_price": None,
+            }
+
+        data[list_id]["items"].append(entry)
+        self.io.write(data)
+        return True
+
+    def freeform_remove_item(self, list_id: str, item_name: str) -> bool:
+        """Remove the first matching item from a freeform list."""
+        data = self.io.all()
+        if list_id not in data:
+            return False
+        items = data[list_id].get("items", [])
+        for i, item in enumerate(items):
+            if item["item_name"] == item_name:
+                items.pop(i)
+                self.io.write(data)
+                return True
+        return False
+
+    def freeform_link_item(self, list_id: str, item_name: str) -> bool:
+        """Re-resolve an unrecognised item against the current pantry.
+
+        Call this after a free-text item has been added to the pantry.
+        Returns True if the item was found and updated.
+        """
+        data = self.io.all()
+        if list_id not in data:
+            return False
+        item_obj = Item()
+        details = item_obj.get_item_details(item_name)
+        if not details:
+            return False
+        price = item_obj.get_item_price(item_name, mode="per_unit")
+        for item in data[list_id].get("items", []):
+            if item["item_name"] == item_name:
+                item["recognised"] = True
+                item["tags"] = details.get("tags", [])
+                item["unit_price"] = float(price) if price else None
+                self.io.write(data)
+                return True
+        return False
 
     def get_list(self, list_id: str) -> dict | None:
         return self.io.get(list_id)
