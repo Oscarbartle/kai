@@ -101,6 +101,25 @@ def toggle_purchased(
     return _list_response(list_id, updated)
 
 
+@router.patch("/{list_id}/rename", response_model=ShoppingListResponse)
+def rename_list(
+    list_id: str,
+    body: ShoppingListCreate,
+    response: Response,
+    if_match: Annotated[str | None, Header()] = None,
+):
+    """Rename a shopping list."""
+    obj = ShoppingList()
+    data = obj.get_list(list_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Shopping list not found.")
+    check_etag(data, if_match)
+    obj.io.update(list_id, {"name": body.name})
+    updated = obj.get_list(list_id)
+    response.headers["ETag"] = f'"{record_etag(updated)}"'
+    return _list_response(list_id, updated)
+
+
 @router.post("/{list_id}/items", response_model=ShoppingListResponse, status_code=201)
 def add_item_to_freeform(
     list_id: str,
