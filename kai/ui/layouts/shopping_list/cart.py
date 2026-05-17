@@ -256,7 +256,6 @@ class ShoppingListCartMixin:
         self.v_splitter.setStretchFactor(1, 3)
         self.v_splitter.setStretchFactor(2, 1)
 
-        from PySide6.QtCore import QTimer
         QTimer.singleShot(0, lambda: self.v_splitter.setSizes([400, 150, 120]))
 
         right_layout.addWidget(self.v_splitter, 1)
