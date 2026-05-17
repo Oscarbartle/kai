@@ -1,8 +1,6 @@
-import os
-
-
 def _is_remote() -> bool:
-    return os.environ.get("KAI_BACKEND", "local").lower() == "remote"
+    from kai.core import settings
+    return settings.get("backend") == "remote"
 
 
 def get_recipe():

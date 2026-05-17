@@ -1,19 +1,16 @@
-import os
 import requests
+
+_CF_CLIENT_ID = "9eec58e2ed475215b0d1cf5bfff9cc4d.access"
+_CF_CLIENT_SECRET = "05e5c44b07bd91ad5945c5f345162c74691573ad5d82f49c1828628e61a3cb34"
 
 
 def get_session() -> requests.Session:
     s = requests.Session()
-    cid = os.environ.get("KAI_CF_CLIENT_ID", "")
-    csecret = os.environ.get("KAI_CF_CLIENT_SECRET", "")
-    if cid:
-        s.headers["CF-Access-Client-Id"] = cid
-    if csecret:
-        s.headers["CF-Access-Client-Secret"] = csecret
+    s.headers["CF-Access-Client-Id"] = _CF_CLIENT_ID
+    s.headers["CF-Access-Client-Secret"] = _CF_CLIENT_SECRET
     return s
 
 
 def base_url() -> str:
     from kai.core import settings
-    url = os.environ.get("KAI_API_URL") or settings.get("api_url") or "http://localhost:8000"
-    return url.rstrip("/")
+    return settings.get("api_url").rstrip("/")
