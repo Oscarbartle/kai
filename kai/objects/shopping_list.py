@@ -370,7 +370,8 @@ class ShoppingList:
     def freeform_add_item(self, list_id: str, item_name: str) -> bool:
         """Add an item to a freeform list.  Returns False if list not found.
 
-        If item_name exists in the pantry, metadata (price, tags) is attached.
+        Does a case-insensitive pantry lookup so "Milk" matches "milk".
+        Uses the canonical pantry name when found so metadata resolves correctly.
         Unknown items are added with recognised=False so clients can flag them.
         """
         data = self.io.all()
@@ -378,16 +379,26 @@ class ShoppingList:
             return False
 
         item_obj = Item()
-        details = item_obj.get_item_details(item_name)
+
+        # Case-insensitive pantry lookup → canonical name
+        name_lower = item_name.lower()
+        canonical_name = next(
+            (d["name"] for d in item_obj.io.all().values() if d.get("name", "").lower() == name_lower),
+            None,
+        )
+        lookup_name = canonical_name or item_name
+        details = item_obj.get_item_details(lookup_name) if canonical_name else None
 
         if details:
-            price = item_obj.get_item_price(item_name, mode="per_unit")
+            price = item_obj.get_item_price(lookup_name, mode="per_unit")
             entry = {
-                "item_name": item_name,
+                "item_name": lookup_name,
                 "purchased": False,
                 "recognised": True,
                 "tags": details.get("tags", []),
                 "unit_price": float(price) if price else None,
+                "price": float(price) if price else None,
+                "units_needed": 1,
             }
         else:
             entry = {
@@ -396,10 +407,12 @@ class ShoppingList:
                 "recognised": False,
                 "tags": [],
                 "unit_price": None,
+                "price": None,
+                "units_needed": 1,
             }
 
-        existing = {it["item_name"] for it in data[list_id]["items"]}
-        if item_name not in existing:
+        existing = {it["item_name"].lower() for it in data[list_id]["items"]}
+        if lookup_name.lower() not in existing:
             data[list_id]["items"].append(entry)
             self.io.write(data)
         return True
