@@ -315,6 +315,47 @@ class ShoppingList:
         }, overwrite=True)
         return list_id
 
+    def regenerate(
+        self,
+        list_id: str,
+        recipe_entries: list,
+        exclude_long_term: bool = True,
+        name: str = "",
+        extra_items: list = None,
+        lt_missing: list = None,
+    ) -> str:
+        """Regenerate an existing list in place, preserving purchased state. Returns list_id."""
+        data = self.get_list(list_id)
+        if data is None:
+            return self.generate(recipe_entries, exclude_long_term, name, extra_items, lt_missing)
+
+        prev_purchased = {it["item_name"]: it.get("purchased", False) for it in data.get("items", [])}
+
+        items = self.compute_items(recipe_entries, exclude_long_term, extra_items)
+        if lt_missing:
+            lt_items = self.compute_long_term_items(recipe_entries, extra_items)
+            items.extend(lt for lt in lt_items if lt["item_name"] in lt_missing)
+
+        for item in items:
+            if item["item_name"] in prev_purchased:
+                item["purchased"] = prev_purchased[item["item_name"]]
+
+        recipe_names = [
+            e["recipe_name"] + (f" x{e['multiplier']}" if e.get("multiplier", 1) > 1 else "")
+            for e in recipe_entries
+        ]
+        self.io.update(list_id, {
+            "type": "generated",
+            "name": name or ", ".join(recipe_names),
+            "recipes": recipe_names,
+            "recipe_entries": recipe_entries,
+            "extra_items": extra_items or [],
+            "lt_missing": lt_missing or [],
+            "items": items,
+            "date_generated": datetime.now().isoformat(),
+        })
+        return list_id
+
     def create_freeform(self, name: str) -> str:
         """Create a named freeform shopping list and return its ID."""
         list_id = str(uuid.uuid4())

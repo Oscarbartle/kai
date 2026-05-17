@@ -45,6 +45,7 @@ class ShoppingListPage(ShoppingListPickerMixin, ShoppingListCartMixin, QWidget):
         self.links_button.clicked.connect(self._on_links)
         self.clear_button.clicked.connect(self._on_clear_list)
         self.save_button.clicked.connect(self._on_save)
+        self.refresh_button.clicked.connect(self._on_refresh)
         self.item_search.textChanged.connect(self._filter_item_rows)
         self.recipe_search.textChanged.connect(self._filter_recipe_cards)
         self.state.new_recipes.connect(self._refresh_recipe_cards)

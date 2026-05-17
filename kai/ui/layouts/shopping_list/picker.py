@@ -517,12 +517,17 @@ class ShoppingListPickerMixin:
 
         self.recipe_entries = list_data.get("recipe_entries", [])
         self.extra_items = list_data.get("extra_items", [])
-        self.name_input.setText(list_data.get("name", ""))
+        list_name = list_data.get("name", "")
+        self.name_input.setText(list_name)
 
         lt_missing = list_data.get("lt_missing", [])
         self.lt_have = {}
         for name in lt_missing:
             self.lt_have[name] = False
+
+        # Show the edit-mode banner so it's clear this is a loaded list
+        self._edit_banner_label.setText(f"Editing saved list: {list_name}")
+        self._edit_banner.setVisible(True)
 
         self._refresh_cart()
         self._show_recipes()
