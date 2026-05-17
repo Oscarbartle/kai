@@ -94,6 +94,29 @@ class Palette:
 
 
 PALETTES: dict[str, Palette] = {
+    "kai": Palette(
+        name="kai",
+        bg="#191919",
+        surface="#0f110f",
+        card="#222222",
+        border="#6d6d6d",
+        text="#e1e8ef",
+        text_dim="#a3a3a3",
+        text_faint="#737373",
+        accent="#e7d095",
+        accent_fg="#ffffff",
+        success="#34d399",
+        danger="#f87171",
+        warning="#d4845c",
+        btn_bg="#a6283d",
+        btn_fg="#ffffff",
+        btn_hover="#465c44",
+        btn_pressed="#df1d3d",
+        list_hl="#445443",
+        list_hl_fg="#ffffff",
+        scroll="#a3a3a3",
+        scroll_hover="#e1e8ef",
+    ),
     "graphite": Palette(
         name="graphite",
         bg="#1a1a1e",
@@ -158,7 +181,7 @@ PALETTES: dict[str, Palette] = {
 
 # ── active palette ───────────────────────────────────────────────── #
 
-_active: Palette = PALETTES["graphite"]
+_active: Palette = PALETTES["kai"]
 
 def _get_data_dir() -> Path:
     from kai.core import settings as _s
@@ -191,8 +214,8 @@ def _load_saved_theme():
         return
     try:
         with _pref_path.open("r", encoding="utf-8") as f:
-            name = json.load(f).get("theme", "graphite")
-        _active = PALETTES.get(name, PALETTES["graphite"])
+            name = json.load(f).get("theme", "kai")
+        _active = PALETTES.get(name, PALETTES["kai"])
     except (json.JSONDecodeError, TypeError):
         pass  # fall back to whatever _active already is
 
@@ -248,7 +271,7 @@ def delete_custom_palette(name: str):
 
 
 def is_builtin(name: str) -> bool:
-    return name in ("graphite", "slate", "moss", "dusk")
+    return name in ("kai", "graphite", "slate", "moss", "dusk")
 
 
 def set_theme(name: str):

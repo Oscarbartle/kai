@@ -398,8 +398,10 @@ class ShoppingList:
                 "unit_price": None,
             }
 
-        data[list_id]["items"].append(entry)
-        self.io.write(data)
+        existing = {it["item_name"] for it in data[list_id]["items"]}
+        if item_name not in existing:
+            data[list_id]["items"].append(entry)
+            self.io.write(data)
         return True
 
     def freeform_remove_item(self, list_id: str, item_name: str) -> bool:

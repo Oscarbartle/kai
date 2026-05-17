@@ -135,6 +135,7 @@ class ShoppingListCartMixin:
         self._autosave_timer.setSingleShot(True)
         self._autosave_timer.setInterval(3000)
         self._autosave_timer.timeout.connect(self._on_save)
+        self._suppress_autosave = False
 
         # ── vertical splitter: Cart / Shopping List / Long-term ── #
         self.v_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -363,7 +364,12 @@ class ShoppingListCartMixin:
             self.cart_layout.addStretch()
             self.save_button.setEnabled(True)
             self.clear_button.setEnabled(True)
+<<<<<<< Updated upstream
             self._autosave_timer.start()  # restart debounce on every change
+=======
+            if not self._suppress_autosave:
+                self._autosave_timer.start()  # restart debounce on every change
+>>>>>>> Stashed changes
 
         self._auto_render()
         self._save_draft()
@@ -670,12 +676,13 @@ class ShoppingListCartMixin:
         self.name_input.setText(list_data.get("name", ""))
         lt_missing = list_data.get("lt_missing", [])
         self.lt_have = {n: False for n in lt_missing}
-        # Reflect server-side purchased state back into preview_items
-        server_purchased = {it["item_name"]: it.get("purchased", False) for it in list_data.get("items", [])}
-        for item in self.preview_items:
-            if item["item_name"] in server_purchased:
-                item["purchased"] = server_purchased[item["item_name"]]
-        self._refresh_cart()
+        self.preview_items = list_data.get("items", [])
+        self._autosave_timer.stop()
+        self._suppress_autosave = True
+        try:
+            self._refresh_cart()
+        finally:
+            self._suppress_autosave = False
 
     # ── export ─────────────────────────────────────────────────── #
 
