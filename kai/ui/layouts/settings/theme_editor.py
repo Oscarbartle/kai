@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 from kai.ui import theme
 from kai.ui.theme import Palette
+from kai.ui.tokens import SPACE_SM, SPACE_MD, SPACE_LG, RADIUS_MD
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QScrollArea, QColorDialog, QGridLayout, QComboBox, QFrame,
 )
 from PySide6.QtCore import Qt, Signal
@@ -42,7 +45,7 @@ _GROUPS = [
 
 
 class ColorSwatch(QPushButton):
-    """A small color button that opens QColorDialog on click."""
+    """Colour button that opens QColorDialog on click."""
 
     color_changed = Signal(str)
 
@@ -75,61 +78,72 @@ class ColorSwatch(QPushButton):
         self._apply()
 
 
-class ThemeEditor(QWidget):
+class ThemeEditorDialog(QDialog):
+    """Dialog for creating or editing a theme. Pass edit_name to pre-load a custom theme."""
+
     theme_changed = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, edit_name: str | None = None):
         super().__init__(parent)
+        self._edit_name = edit_name
         self._swatches: dict[str, ColorSwatch] = {}
-        self._build()
 
-    def _build(self):
         t = theme.theme()
+        self.setWindowTitle("Edit Theme" if edit_name else "New Theme")
+        self.setMinimumWidth(480)
+        self.setMinimumHeight(560)
+        self.setStyleSheet(f"background: {t.bg}; color: {t.text};")
+
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(12)
+        root.setContentsMargins(SPACE_LG, SPACE_LG, SPACE_LG, SPACE_LG)
+        root.setSpacing(SPACE_MD)
 
-        def _slbl(text):
-            lbl = QLabel(text)
-            lbl.setStyleSheet(theme.section_label_css())
-            return lbl
+        # ── base selector (hidden when editing an existing custom theme) ── #
+        if not edit_name:
+            base_lbl = QLabel("Start from")
+            base_lbl.setProperty("role", "dim")
+            root.addWidget(base_lbl)
+            self.base_combo = QComboBox()
+            self.base_combo.addItems([n.capitalize() for n in theme.theme_names()])
+            self.base_combo.setCurrentText(t.name.capitalize())
+            self.base_combo.setFixedHeight(34)
+            self.base_combo.currentTextChanged.connect(self._load_base)
+            root.addWidget(self.base_combo)
+        else:
+            self.base_combo = None
 
-        def _divider():
-            line = QFrame()
-            line.setFrameShape(QFrame.Shape.HLine)
-            line.setStyleSheet(theme.divider_line_css())
-            return line
-
-        root.addWidget(_slbl("Theme Editor"))
-
-        base_lbl = QLabel("Start from")
-        base_lbl.setProperty("role", "dim")
-        root.addWidget(base_lbl)
-        self.base_combo = QComboBox()
-        self.base_combo.addItems([n.capitalize() for n in theme.theme_names()])
-        self.base_combo.setCurrentText(theme.theme().name.capitalize())
-        self.base_combo.setFixedHeight(34)
-        self.base_combo.currentTextChanged.connect(self._load_base)
-        root.addWidget(self.base_combo)
-
+        # ── theme name ────────────────────────────────────────────────── #
         name_lbl = QLabel("Theme name")
         name_lbl.setProperty("role", "dim")
         root.addWidget(name_lbl)
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("my-theme")
         self.name_input.setFixedHeight(34)
+        if edit_name:
+            self.name_input.setText(edit_name)
+            self.name_input.setEnabled(False)
         root.addWidget(self.name_input)
 
-        root.addWidget(_divider())
+        div1 = QFrame()
+        div1.setFrameShape(QFrame.Shape.HLine)
+        div1.setStyleSheet(theme.divider_line_css())
+        root.addWidget(div1)
 
+        # ── colour grid ───────────────────────────────────────────────── #
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; } QWidget { background: transparent; }")
+        scroll.setStyleSheet(
+            "QScrollArea { border: none; background: transparent; } "
+            "QWidget { background: transparent; }"
+        )
         inner = QWidget()
         grid = QGridLayout(inner)
         grid.setContentsMargins(0, 4, 0, 4)
         grid.setHorizontalSpacing(16)
         grid.setVerticalSpacing(10)
+
+        # load colours from the target palette
+        source = theme.PALETTES.get(edit_name or t.name, t)
 
         row = 0
         for group_name, tokens in _GROUPS:
@@ -144,8 +158,9 @@ class ThemeEditor(QWidget):
             for attr, display in tokens:
                 lbl = QLabel(display)
                 lbl.setProperty("role", "body")
-                swatch = ColorSwatch(getattr(t, attr))
-                hex_lbl = QLabel(getattr(t, attr))
+                val = getattr(source, attr, "#ffffff")
+                swatch = ColorSwatch(val)
+                hex_lbl = QLabel(val)
                 hex_lbl.setProperty("role", "dim")
                 hex_lbl.setFixedWidth(80)
                 swatch.color_changed.connect(lambda c, h=hex_lbl: h.setText(c))
@@ -160,25 +175,43 @@ class ThemeEditor(QWidget):
         scroll.setWidget(inner)
         root.addWidget(scroll, 1)
 
-        root.addWidget(_divider())
+        div2 = QFrame()
+        div2.setFrameShape(QFrame.Shape.HLine)
+        div2.setStyleSheet(theme.divider_line_css())
+        root.addWidget(div2)
 
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
+        # ── footer ────────────────────────────────────────────────────── #
         self.status_label = QLabel("")
         self.status_label.setProperty("role", "dim")
-        self.delete_btn = QPushButton("Delete")
-        self.delete_btn.setProperty("btn", "secondary")
-        self.delete_btn.setFixedHeight(36)
-        self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.delete_btn.clicked.connect(self._delete_theme)
+        root.addWidget(self.status_label)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(SPACE_SM)
+
+        if edit_name and not theme.is_builtin(edit_name):
+            del_btn = QPushButton("Delete Theme")
+            del_btn.setProperty("btn", "secondary")
+            del_btn.setFixedHeight(34)
+            del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            del_btn.clicked.connect(self._delete_theme)
+            btn_row.addWidget(del_btn)
+
+        btn_row.addStretch()
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setProperty("btn", "secondary")
+        cancel_btn.setFixedHeight(34)
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+
         save_btn = QPushButton("Save && Apply")
         save_btn.setProperty("btn", "primary")
-        save_btn.setFixedHeight(36)
+        save_btn.setFixedHeight(34)
         save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         save_btn.clicked.connect(self._save_theme)
-        btn_row.addWidget(self.status_label, 1)
-        btn_row.addWidget(self.delete_btn)
         btn_row.addWidget(save_btn)
+
         root.addLayout(btn_row)
 
     def _load_base(self, name: str):
@@ -188,6 +221,9 @@ class ThemeEditor(QWidget):
         for attr, swatch in self._swatches.items():
             swatch.set_color(getattr(p, attr))
             swatch.color_changed.emit(getattr(p, attr))
+        # pre-fill name if selecting a custom theme
+        if not theme.is_builtin(name.lower()):
+            self.name_input.setText(name.lower())
 
     def _save_theme(self):
         name = self.name_input.text().strip().lower().replace(" ", "-")
@@ -200,31 +236,17 @@ class ThemeEditor(QWidget):
             self.status_label.setText("Can't overwrite built-in themes")
             return
 
-        palette = Palette(
-            name=name,
-            **{attr: sw.color() for attr, sw in self._swatches.items()},
-        )
+        palette = Palette(name=name, **{attr: sw.color() for attr, sw in self._swatches.items()})
         theme.save_custom_palette(palette)
         theme.set_theme(name)
-        self.status_label.setStyleSheet(theme.label_css("success"))
-        self.status_label.setText(f"Saved '{name}'")
         self.theme_changed.emit()
+        self.accept()
 
     def _delete_theme(self):
-        name = self.name_input.text().strip().lower().replace(" ", "-")
-        if not name or theme.is_builtin(name) or name not in theme.PALETTES:
-            self.status_label.setStyleSheet(theme.label_css("danger"))
-            self.status_label.setText("Select a custom theme to delete")
+        name = self._edit_name
+        if not name or theme.is_builtin(name):
             return
         theme.delete_custom_palette(name)
         theme.set_theme("graphite")
-        self.status_label.setStyleSheet(theme.label_css("success"))
-        self.status_label.setText(f"Deleted '{name}'")
         self.theme_changed.emit()
-
-    def refresh_base_combo(self):
-        self.base_combo.blockSignals(True)
-        self.base_combo.clear()
-        self.base_combo.addItems([n.capitalize() for n in theme.theme_names()])
-        self.base_combo.setCurrentText(theme.theme().name.capitalize())
-        self.base_combo.blockSignals(False)
+        self.accept()

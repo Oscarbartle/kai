@@ -9,6 +9,18 @@ from .recipe import Recipe
 from .item import Item
 
 
+def _resolve_unit(existing_unit: str, new_unit: str) -> str:
+    """Return the resolved unit when merging two ingredient amounts.
+
+    If the units are compatible (same base family), keep them.
+    If they clash (e.g. grams from one recipe, 'ea' from another), fall back to
+    'ea' so we count whole units rather than mix incompatible magnitudes.
+    """
+    if existing_unit == new_unit:
+        return existing_unit
+    return "ea"
+
+
 class ShoppingList:
     def __init__(self):
         self.io = IO(settings.data_dir() / "shopping_lists.json")
@@ -42,13 +54,12 @@ class ShoppingList:
         """Accumulate *base_amount* of *item_name* into the *aggregated* dict."""
         if item_name in aggregated:
             prev = aggregated[item_name]
-            if prev["base_unit"] == base_unit:
+            resolved = _resolve_unit(prev["base_unit"], base_unit)
+            if resolved == prev["base_unit"]:
                 prev["total_amount"] += base_amount
             else:
-                # Incompatible units (e.g. g from one recipe, ea from another)
-                # — fall back to counting whole units.
                 prev["total_amount"] += 1
-                prev["base_unit"] = "ea"
+                prev["base_unit"] = resolved
             if from_recipe:
                 prev["source_recipe"] = True
         else:
@@ -123,27 +134,50 @@ class ShoppingList:
                 continue
             if item_names_filter is not None and item_name not in item_names_filter:
                 continue
-            units = extra.get("units", 1)
-            if item_name in aggregated:
-                prev = aggregated[item_name]
-                prev["source_manual"] = True
-                prev["manual_units"] = int(prev.get("manual_units", 0) + units)
-                if prev["base_unit"] == "ea":
-                    prev["total_amount"] += units
+
+            weight_kg = extra.get("weight_kg")
+
+            if weight_kg is not None:
+                # Weight-based item — price per kg × weight
+                if item_name in aggregated:
+                    prev = aggregated[item_name]
+                    prev["source_manual"] = True
+                    prev["weight_kg"] = round(prev.get("weight_kg", 0) + weight_kg, 3)
+                    prev["total_amount"] += weight_kg
                 else:
-                    # Already have a weight total — add whole packages' worth.
-                    pkg = prev["pkg_size"] or 1
-                    prev["total_amount"] += pkg * units
+                    price_per_kg = item_obj.get_item_price(item_name, mode="per_weight")
+                    meta = self._load_item_meta(item_name, item_obj)
+                    meta["unit_price"] = float(price_per_kg) if price_per_kg else None
+                    aggregated[item_name] = {
+                        **meta,
+                        "total_amount": float(weight_kg),
+                        "base_unit": "kg",
+                        "source_recipe": False,
+                        "source_manual": True,
+                        "manual_units": 0,
+                        "weight_kg": weight_kg,
+                    }
             else:
-                meta = self._load_item_meta(item_name, item_obj)
-                aggregated[item_name] = {
-                    **meta,
-                    "total_amount": float(units),
-                    "base_unit": "ea",
-                    "source_recipe": False,
-                    "source_manual": True,
-                    "manual_units": int(units),
-                }
+                units = extra.get("units", 1)
+                if item_name in aggregated:
+                    prev = aggregated[item_name]
+                    prev["source_manual"] = True
+                    prev["manual_units"] = int(prev.get("manual_units", 0) + units)
+                    if prev["base_unit"] == "ea":
+                        prev["total_amount"] += units
+                    else:
+                        pkg = prev["pkg_size"] or 1
+                        prev["total_amount"] += pkg * units
+                else:
+                    meta = self._load_item_meta(item_name, item_obj)
+                    aggregated[item_name] = {
+                        **meta,
+                        "total_amount": float(units),
+                        "base_unit": "ea",
+                        "source_recipe": False,
+                        "source_manual": True,
+                        "manual_units": int(units),
+                    }
 
     def _finalise_aggregated(self, aggregated: dict) -> list[dict]:
         """Convert internal aggregation dicts to display-ready item dicts."""
@@ -167,12 +201,15 @@ class ShoppingList:
             item["amount"] = display_amount
             item["amount_unit"] = display_unit
             item["units_needed"] = units_needed
-            item["price"] = (
-                round(data["unit_price"] * units_needed, 2)
-                if data["unit_price"]
-                else None
-            )
-            # Remove aggregation-internal fields before returning
+
+            # Weight items: price = price_per_kg × total_kg
+            if data.get("weight_kg") is not None and data["unit_price"]:
+                item["price"] = round(data["unit_price"] * data["weight_kg"], 2)
+            elif data["unit_price"]:
+                item["price"] = round(data["unit_price"] * units_needed, 2)
+            else:
+                item["price"] = None
+
             for key in ("total_amount", "base_unit", "pkg_size", "pkg_unit"):
                 item.pop(key, None)
             items.append(item)

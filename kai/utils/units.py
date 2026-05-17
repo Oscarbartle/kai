@@ -6,15 +6,14 @@ from __future__ import annotations
 
 # ── constants ─────────────────────────────────────────────────────── #
 
-# Maps lowercase unit alias → (canonical_base_unit, multiplier_to_base)
+# Maps lowercase unit alias → (canonical_base_unit, multiplier_to_base).
+# All keys are lowercase so callers can normalise with unit.lower() before lookup.
 _TO_BASE: dict[str, tuple[str, float]] = {
-    "g":    ("g",  1.0),
-    "kg":   ("g",  1000.0),
-    "ml":   ("mL", 1.0),
-    "mL":   ("mL", 1.0),
-    "l":    ("mL", 1000.0),
-    "L":    ("mL", 1000.0),
-    "ea":   ("ea", 1.0),
+    "g":  ("g",  1.0),
+    "kg": ("g",  1000.0),
+    "ml": ("mL", 1.0),
+    "l":  ("mL", 1000.0),
+    "ea": ("ea", 1.0),
 }
 
 # Pairs of base units that are mutually convertible
@@ -42,7 +41,7 @@ def to_base(amount: float, unit: str) -> tuple[float, str]:
     >>> to_base(3, "ea")
     (3.0, 'ea')
     """
-    base_unit, factor = _TO_BASE.get(unit, _TO_BASE.get(unit.lower(), ("ea", 1.0)))
+    base_unit, factor = _TO_BASE.get(unit.lower(), ("ea", 1.0))
     return amount * factor, base_unit
 
 
@@ -54,8 +53,8 @@ def units_compatible(unit_a: str, unit_b: str) -> bool:
     >>> units_compatible("g", "mL")
     False
     """
-    _, base_a = _TO_BASE.get(unit_a, _TO_BASE.get(unit_a.lower(), ("ea", 1.0)))
-    _, base_b = _TO_BASE.get(unit_b, _TO_BASE.get(unit_b.lower(), ("ea", 1.0)))
+    _, base_a = _TO_BASE.get(unit_a.lower(), ("ea", 1.0))
+    _, base_b = _TO_BASE.get(unit_b.lower(), ("ea", 1.0))
     return base_a == base_b
 
 

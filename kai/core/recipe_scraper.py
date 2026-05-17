@@ -17,16 +17,19 @@ def scrape_recipe(url: str) -> dict:
     try:
         scraper = scrape_html(html=response.text, org_url=url)
     except Exception as e:
-        raise ValueError(f"Could not parse recipe from this site: {e}") from e
+        # recipe_scrapers raises many heterogeneous exceptions depending on the site
+        raise ValueError(f"Could not parse recipe from {url}: {e}") from e
 
+    # Each field is extracted independently so a missing field doesn't abort the import.
+    # The library raises heterogeneous exceptions per-field, so broad catches are intentional.
     try:
         title = scraper.title() or ""
     except Exception:
         title = ""
 
     try:
-        servings = scraper.yields()
-        servings = int("".join(c for c in servings if c.isdigit()) or "1")
+        raw_yield = scraper.yields() or "1"
+        servings = int("".join(c for c in raw_yield if c.isdigit()) or "1")
     except Exception:
         servings = 1
 
@@ -41,7 +44,7 @@ def scrape_recipe(url: str) -> dict:
         ingredients = []
 
     if not ingredients and not instructions:
-        raise ValueError("No recipe data found at this URL")
+        raise ValueError(f"No recipe content found at {url} — the site may not be supported")
 
     return {
         "title": title,

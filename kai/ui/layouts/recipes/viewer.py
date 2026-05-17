@@ -1,11 +1,29 @@
+from __future__ import annotations
+
 from kai.objects.recipe import Recipe
 from kai.ui.widgets.recipe_details import RecipeDetails, invalidate_recipe_card_cache
 from kai.ui.widgets.recipe_view import RecipeView
 from kai.ui import theme
 
-from PySide6.QtWidgets import QLabel, QWidget, QVBoxLayout, QHBoxLayout, QStyle, QStyleOption, QScrollArea, QStackedWidget, QPushButton
+from PySide6.QtWidgets import (
+    QLabel, QWidget, QVBoxLayout, QHBoxLayout, QStyle, QStyleOption,
+    QScrollArea, QStackedWidget, QPushButton, QComboBox, QLineEdit,
+)
 from PySide6.QtGui import QPainter, QCursor
 from PySide6.QtCore import Qt
+
+
+# Sort keys read attributes already on the RecipeDetails card — cost is cached
+# in RecipeDetails._calculate_cost so cost-based sorts no longer recompute.
+# (label, card_key_fn, reverse)
+_SORTS: list[tuple[str, callable, bool]] = [
+    ("A–Z",              lambda c: c.name.lower(),                                 False),
+    ("Z–A",              lambda c: c.name.lower(),                                 True),
+    ("Cheapest",         lambda c: c.estimated_cost if c.estimated_cost else 9999, False),
+    ("Most Expensive",   lambda c: c.estimated_cost or 0,                          True),
+    ("Favourites First", lambda c: c.is_favourite,                                 True),
+]
+_SORT_LABELS = [s[0] for s in _SORTS]
 
 
 class RecipesViewer(QWidget):
@@ -14,6 +32,7 @@ class RecipesViewer(QWidget):
 
         self.state = state
         self.active_tag = "All"
+        self.active_sort = 0
 
         self.layout = QVBoxLayout()
         self.layout.setContentsMargins(0, 0, 0, 0)
@@ -34,8 +53,22 @@ class RecipesViewer(QWidget):
 
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(8)
         header.addWidget(self.recipes_label)
-        header.addStretch()
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search recipes…")
+        self.search_input.setFixedHeight(34)
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.textChanged.connect(self._filter_recipes)
+        header.addWidget(self.search_input, 1)
+
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItems(_SORT_LABELS)
+        self.sort_combo.setFixedHeight(34)
+        self.sort_combo.setToolTip("Sort recipes")
+        self.sort_combo.currentIndexChanged.connect(self._on_sort_changed)
+        header.addWidget(self.sort_combo)
 
         self.import_button = QPushButton("Import URL")
         self.import_button.setFixedHeight(34)
@@ -90,31 +123,66 @@ class RecipesViewer(QWidget):
         self.active_tag = tag
         self.reload_recipes()
 
+    def _filter_recipes(self, text: str = ""):
+        q = text.lower().strip()
+        for i in range(self.scroll_layout.count()):
+            w = self.scroll_layout.itemAt(i).widget()
+            if w is None:
+                continue
+            name = getattr(w, "name", "") or ""
+            tags = getattr(w, "tags", []) or []
+            match = (not q
+                     or q in name.lower()
+                     or any(q in t.lower() for t in tags))
+            w.setVisible(match)
+
+    def _on_sort_changed(self, index: int):
+        self.active_sort = index
+        # reorder existing widgets — no card rebuild
+        cards = []
+        while self.scroll_layout.count():
+            item = self.scroll_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                cards.append(w)
+        self._sort_and_layout_cards(cards)
+        if hasattr(self, "search_input"):
+            self._filter_recipes(self.search_input.text())
+
+    def _sort_and_layout_cards(self, cards):
+        _, key_fn, reverse = _SORTS[self.active_sort]
+        cards.sort(key=key_fn, reverse=reverse)
+        for c in cards:
+            self.scroll_layout.addWidget(c)
+        self.scroll_layout.addStretch()
+
     def reload_recipes(self):
         while self.scroll_layout.count():
             child = self.scroll_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
 
-        recipes_data = Recipe().get_recipes()
-        recipes_data.sort(key=lambda x: x[0])
-
-        for name, recipe_id in recipes_data:
+        recipe_obj = Recipe()
+        cards = []
+        # iterate the dict once — avoids N redundant _get_id_by_name scans
+        for _, doc in recipe_obj.io.all().items():
+            name = doc.get("name")
+            if not name:
+                continue
             if self.active_tag == "★ Favourites":
-                details = Recipe().get_recipe_details(name)
-                if not details or not details.get("is_favourite", False):
+                if not doc.get("is_favourite", False):
                     continue
             elif self.active_tag != "All":
-                details = Recipe().get_recipe_details(name)
-                if details and self.active_tag not in details.get("tags", []):
+                if self.active_tag not in (doc.get("tags") or []):
                     continue
-            card = RecipeDetails(name, self.state)
+            card = RecipeDetails(name, self.state, doc=doc)
             card.recipe_clicked.connect(self._open_recipe)
-            self.scroll_layout.addWidget(card)
+            cards.append(card)
 
-        self.scroll_layout.addStretch()
+        self._sort_and_layout_cards(cards)
+        if hasattr(self, "search_input"):
+            self._filter_recipes(self.search_input.text())
 
-        # if we were viewing a recipe that got deleted, go back to list
         if self.stack.currentIndex() == 1:
             self._close_recipe()
 

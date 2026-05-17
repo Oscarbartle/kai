@@ -1,11 +1,26 @@
+"""JSON-backed key-value store with a TTL cache.
+
+Each IO instance wraps a single JSON file. A shared class-level cache avoids
+redundant stat() and read() calls when the same file is accessed repeatedly
+within a short burst. The cache is invalidated when the file's mtime changes.
+
+A threading.Lock protects all cache mutations so background worker threads
+(Woolworths cart, refresh worker) cannot corrupt the cache via concurrent writes.
+Writes use a temp-file + os.replace() pattern so an interrupted write always
+leaves either the old or the new file intact — never partial JSON.
+"""
 import json
+import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
-# Only re-check the file's mtime over the network this often (seconds).
-# Keeps SMB stat() calls to one per burst of reads instead of one per read().
+# Only re-check the file's mtime this often (seconds).
+# Keeps SMB stat() calls to one per burst instead of one per read().
 _MTIME_TTL = 0.5
+_lock = threading.Lock()
+
 
 class IO:
     # Shared across all IO instances — keyed by resolved absolute path string
@@ -25,36 +40,49 @@ class IO:
         key = str(self.path)
         now = time.monotonic()
 
-        # Skip the stat() entirely if we checked recently and have cached data.
-        if key in IO._cache and (now - IO._mtime_checked_at.get(key, 0)) < _MTIME_TTL:
-            return IO._cache[key]
+        with _lock:
+            # Skip stat() entirely if we checked recently and have cached data.
+            if key in IO._cache and (now - IO._mtime_checked_at.get(key, 0)) < _MTIME_TTL:
+                return IO._cache[key]
 
         try:
             mtime = self.path.stat().st_mtime
         except OSError:
             mtime = None
 
-        IO._mtime_checked_at[key] = now
+        with _lock:
+            IO._mtime_checked_at[key] = now
 
-        if key in IO._cache and mtime == IO._cache_mtime.get(key):
-            return IO._cache[key]
+            if key in IO._cache and mtime == IO._cache_mtime.get(key):
+                return IO._cache[key]
 
         with self.path.open("r", encoding="utf-8") as f:
-            IO._cache[key] = json.load(f)
-        IO._cache_mtime[key] = mtime
-        return IO._cache[key]
+            data = json.load(f)
+
+        with _lock:
+            IO._cache[key] = data
+            IO._cache_mtime[key] = mtime
+
+        return data
 
     def write(self, data: dict) -> None:
-        with self.path.open("w", encoding="utf-8") as f:
+        # Write to a sibling .tmp file then atomically replace the target so an
+        # interrupted write never leaves partial JSON on disk.
+        tmp = self.path.with_suffix(".tmp")
+        with tmp.open("w", encoding="utf-8") as f:
             json.dump(data, f, indent=4)
+        os.replace(tmp, self.path)
+
         key = str(self.path)
-        IO._cache[key] = data
         try:
             mtime = self.path.stat().st_mtime
         except OSError:
             mtime = None
-        IO._cache_mtime[key] = mtime
-        IO._mtime_checked_at[key] = time.monotonic()
+
+        with _lock:
+            IO._cache[key] = data
+            IO._cache_mtime[key] = mtime
+            IO._mtime_checked_at[key] = time.monotonic()
 
     # ----------------- CRUD -----------------
     def create(self, key: str, value: Any, overwrite: bool = False) -> None:
@@ -80,7 +108,6 @@ class IO:
 
         data[key].update(value)
         self.write(data)
-
 
     def delete(self, key: str) -> None:
         data = self.read()

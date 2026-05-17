@@ -35,34 +35,65 @@ class Item(BaseModel):
                     "date_added", datetime.now().isoformat()
                 )
                 changed = True
+            if "sold_by_weight" not in item_data:
+                item_data["sold_by_weight"] = False
+                changed = True
+            if "default_weight_kg" not in item_data:
+                item_data["default_weight_kg"] = None
+                changed = True
         if changed:
             self.io.write(data)
 
     # ── Woolworths data ──────────────────────────────────────────── #
 
-    def _fetch_online_data(self, stock_code: int):
-        return WoolworthsData(stock_code).get_data()
+    def _fetch_online_data(self, stock_code: int) -> dict | None:
+        """Fetch Woolworths product data. Returns None if the request fails."""
+        try:
+            return WoolworthsData(stock_code).get_data()
+        except RuntimeError:
+            return None
 
-    def refresh_online_data(self, item_name: str):
+    def refresh_online_data(self, item_name: str) -> dict | None:
         """Re-fetch Woolworths data for an item and persist it."""
+        from .price_history import PriceHistory
+
         item_id = self._get_id_by_name(item_name)
         if not item_id:
             return None
         doc = self.io.all()[item_id]
         new_data = self._fetch_online_data(doc["stock_code"])
-        if new_data:
+        if new_data is not None:
+            out_of_stock = new_data.get("Availability", {}).get("Out of Stock", False)
             self.io.update(item_id, {
                 "online_data": new_data,
                 "date_updated": datetime.now().isoformat(),
                 "unavailable": False,
+                "out_of_stock": bool(out_of_stock),
             })
+            sp = new_data.get("Standard Pricing", {})
+            cur = sp.get("Current Price")
+            orig = sp.get("Original Price")
+            if cur is not None:
+                PriceHistory().record(item_id, {
+                    "current_price": float(cur),
+                    "original_price": float(orig) if orig else None,
+                    "on_special": bool(cur and orig and float(cur) < float(orig)),
+                    "discount_pct": sp.get("Discount Percentage", ""),
+                })
         else:
-            self.io.update(item_id, {"unavailable": True})
+            self.io.update(item_id, {"unavailable": True, "out_of_stock": False})
         return new_data
 
     # ── CRUD ─────────────────────────────────────────────────────── #
 
-    def create(self, name: str, stock_code: int, tags: list = None) -> bool:
+    def create(
+        self,
+        name: str,
+        stock_code: int,
+        tags: list = None,
+        sold_by_weight: bool = False,
+        default_weight_kg: float | None = None,
+    ) -> bool:
         """Create a new item.  Returns False if the name already exists."""
         return self._create_record(str(uuid.uuid4()), {
             "name": name,
@@ -70,6 +101,8 @@ class Item(BaseModel):
             "online_data": self._fetch_online_data(stock_code),
             "tags": tags,
             "is_long_term": False,
+            "sold_by_weight": sold_by_weight,
+            "default_weight_kg": default_weight_kg,
             "date_added": datetime.now().isoformat(),
             "date_updated": datetime.now().isoformat(),
         })
