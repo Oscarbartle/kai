@@ -5,10 +5,11 @@ from kai.ui.layouts.recipes.viewer import RecipesViewer
 from kai.ui import theme
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QStyle, QStyleOption, QDialog
 )
 from PySide6.QtGui import QPainter
+from PySide6.QtCore import Qt
 
 
 class RecipesPage(QWidget):
@@ -17,12 +18,15 @@ class RecipesPage(QWidget):
 
         self.state = state
 
-        self.layout = QGridLayout()
-        self.layout.setContentsMargins(8, 8, 8, 8)
-        self.layout.setSpacing(8)
-        self.layout.setColumnStretch(0, 1)
-        self.layout.setColumnStretch(1, 3)
-        self.setLayout(self.layout)
+        outer = QHBoxLayout()
+        outer.setContentsMargins(8, 8, 8, 8)
+        outer.setSpacing(0)
+        self.setLayout(outer)
+
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setChildrenCollapsible(False)
+        self.splitter.setHandleWidth(6)
+        outer.addWidget(self.splitter)
 
         self.add_widgets()
 
@@ -35,13 +39,15 @@ class RecipesPage(QWidget):
     def add_widgets(self):
         self.tags = Tags(self.state, source="recipes")
         self.tags.setObjectName("page_panel")
-        self.layout.addWidget(self.tags, 0, 0)
+        self.splitter.addWidget(self.tags)
 
         self.recipes_viewer = RecipesViewer(self.state)
         self.recipes_viewer.setObjectName("page_panel")
         self.recipes_viewer.add_button.clicked.connect(self._open_add_dialog)
         self.recipes_viewer.import_button.clicked.connect(self._open_import_dialog)
-        self.layout.addWidget(self.recipes_viewer, 0, 1)
+        self.splitter.addWidget(self.recipes_viewer)
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 3)
 
     def _open_add_dialog(self):
         dialog = QDialog(self)

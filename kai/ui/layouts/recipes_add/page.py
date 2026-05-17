@@ -95,7 +95,7 @@ class RecipesAdd(QWidget):
         self.available_list.setStyleSheet(theme.list_widget_css())
         self.selected_list.setStyleSheet(theme.list_widget_css())
         self.nominal_cb.setStyleSheet(theme.checkbox_css())
-        self.button.setStyleSheet(theme.button_css(primary=True))
+        self.button.setStyleSheet(theme.button_css("primary"))
 
         # two-column body
         body = QHBoxLayout()

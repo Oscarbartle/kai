@@ -6,7 +6,7 @@ from kai.ui.refresh_worker import run_refresh
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QStyle, QStyleOption
+    QScrollArea, QStyle, QStyleOption, QStackedWidget,
 )
 from PySide6.QtGui import QPainter, QCursor
 from PySide6.QtCore import Qt, Signal
@@ -56,6 +56,13 @@ class RecipeView(QWidget):
         self.back_btn.setFixedHeight(32)
         self.back_btn.clicked.connect(self.back_requested.emit)
         header.addWidget(self.back_btn)
+
+        self.stats_btn = QPushButton("\ud83d\udcca Stats")
+        self.stats_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.stats_btn.setProperty("btn", "secondary")
+        self.stats_btn.setFixedHeight(32)
+        self.stats_btn.clicked.connect(self._toggle_stats)
+        header.addWidget(self.stats_btn)
 
         title = QLabel(self.name)
         title.setStyleSheet(f"color: {t.text}; font-size: 18px; font-weight: bold;")
@@ -226,7 +233,19 @@ class RecipeView(QWidget):
         body.addWidget(ing_card, 2)
         body.addWidget(inst_card, 3)
 
-        root.addLayout(body, 1)
+        # wrap body in a page so we can swap to stats
+        self._body_stack = QStackedWidget()
+
+        recipe_page = QWidget()
+        recipe_page.setStyleSheet("background: transparent;")
+        recipe_page_lay = QVBoxLayout(recipe_page)
+        recipe_page_lay.setContentsMargins(0, 0, 0, 0)
+        recipe_page_lay.addLayout(body)
+        self._body_stack.addWidget(recipe_page)   # page 0
+
+        self._stats_page = None                    # created lazily
+
+        root.addWidget(self._body_stack, 1)
 
     def _calculate_cost(self):
         sl = ShoppingList()
@@ -238,6 +257,20 @@ class RecipeView(QWidget):
         lt_total = sum(it["price"] for it in lt_items if it.get("price"))
         nominal_total = sum(it["price"] for it in nominal_items if it.get("price"))
         return round(total, 2), round(total + lt_total, 2), round(nominal_total, 2)
+
+    def _toggle_stats(self):
+        from kai.ui.widgets.recipe_stats_panel import RecipeStatsPanel
+
+        if self._body_stack.currentIndex() == 0:
+            # switch to stats
+            if self._stats_page is None:
+                self._stats_page = RecipeStatsPanel(self.name)
+                self._body_stack.addWidget(self._stats_page)
+            self._body_stack.setCurrentWidget(self._stats_page)
+            self.stats_btn.setText("← Recipe")
+        else:
+            self._body_stack.setCurrentIndex(0)
+            self.stats_btn.setText("📊 Stats")
 
     def _refresh_item(self, item_name: str):
         run_refresh([item_name], on_done=self.data_refreshed.emit, parent=self)

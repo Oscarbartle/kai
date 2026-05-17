@@ -9,9 +9,10 @@ _json_path = _LOCAL_DATA_DIR / "settings.json"
 _io = IO(_json_path)
 
 DEFAULTS = {
-    "price_display_mode": "per_unit",  # "per_unit" or "per_weight"
-    "data_dir": "",                     # empty ⇒ use local data/
-    "browser": "firefox",               # browser for Woolworths cart: zen, firefox, chrome, edge, brave, chromium
+    "price_display_mode": "per_unit",       # "per_unit" or "per_weight"
+    "data_dir": "",                          # empty ⇒ use local data/
+    "browser": "firefox",                    # browser for Woolworths cart: zen, firefox, chrome, edge, brave, chromium
+    "price_history_window_days": 30,         # N-day low flag window
 }
 
 
@@ -22,10 +23,8 @@ def get(key: str):
     return val
 
 
-def set(key: str, value):
-    data = _io.read()
-    data[key] = value
-    _io.write(data)
+def set(key: str, value) -> None:
+    _io.create(key, value, overwrite=True)
 
 
 def data_dir() -> Path:

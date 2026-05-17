@@ -1,10 +1,13 @@
+from __future__ import annotations
+from urllib.parse import urlparse, parse_qs
+
 from kai.objects.item import Item
 from kai.ui import theme
 from kai.ui.widgets.tag_pill import TagChip
 
 from PySide6.QtWidgets import (
     QWidget, QStyle, QStyleOption, QPushButton, QVBoxLayout, QHBoxLayout,
-    QLineEdit, QLabel, QCheckBox, QFrame
+    QLineEdit, QLabel, QCheckBox, QFrame, QDoubleSpinBox,
 )
 from PySide6.QtGui import QPainter, QCursor
 from PySide6.QtCore import Qt
@@ -69,7 +72,7 @@ class ItemsAdd(QWidget):
         code_lbl.setProperty("role", "dim")
         card_layout.addWidget(code_lbl)
         self.item_stock_code = QLineEdit()
-        self.item_stock_code.setPlaceholderText("Woolworths product code")
+        self.item_stock_code.setPlaceholderText("Stock code or Woolworths URL")
         self.item_stock_code.setFixedHeight(34)
         card_layout.addWidget(self.item_stock_code)
 
@@ -98,6 +101,29 @@ class ItemsAdd(QWidget):
         self.long_term_cb = QCheckBox("Long-term item")
         card_layout.addWidget(self.long_term_cb)
 
+        self.weight_cb = QCheckBox("Sold by weight (e.g. fresh produce)")
+        card_layout.addWidget(self.weight_cb)
+
+        self.weight_row = QWidget()
+        weight_row_layout = QHBoxLayout(self.weight_row)
+        weight_row_layout.setContentsMargins(0, 0, 0, 0)
+        weight_row_layout.setSpacing(8)
+        weight_lbl = QLabel("Default weight (kg)")
+        weight_lbl.setProperty("role", "dim")
+        weight_row_layout.addWidget(weight_lbl)
+        self.default_weight_spin = QDoubleSpinBox()
+        self.default_weight_spin.setRange(0.1, 50.0)
+        self.default_weight_spin.setSingleStep(0.1)
+        self.default_weight_spin.setDecimals(2)
+        self.default_weight_spin.setValue(0.5)
+        self.default_weight_spin.setSuffix(" kg")
+        self.default_weight_spin.setFixedHeight(34)
+        weight_row_layout.addWidget(self.default_weight_spin)
+        weight_row_layout.addStretch()
+        self.weight_row.setVisible(False)
+        card_layout.addWidget(self.weight_row)
+        self.weight_cb.toggled.connect(self.weight_row.setVisible)
+
         card_layout.addStretch()
 
         # status label lives outside the card
@@ -118,6 +144,11 @@ class ItemsAdd(QWidget):
         self.item_stock_code.setText(str(doc.get("stock_code", "")))
         self.item_tags.setText(", ".join(doc.get("tags", []) or []))
         self.long_term_cb.setChecked(doc.get("is_long_term", False))
+        sold_by_weight = doc.get("sold_by_weight", False)
+        self.weight_cb.setChecked(sold_by_weight)
+        self.weight_row.setVisible(sold_by_weight)
+        if doc.get("default_weight_kg"):
+            self.default_weight_spin.setValue(float(doc["default_weight_kg"]))
         # Disable stock code editing since it drives data fetch
         self.item_stock_code.setReadOnly(True)
         self.item_stock_code.setToolTip("Stock code cannot be changed")
@@ -150,7 +181,7 @@ class ItemsAdd(QWidget):
         for w in (self.item_name, self.item_stock_code, self.item_tags):
             w.setStyleSheet(theme.input_css())
         self.long_term_cb.setStyleSheet(theme.checkbox_css())
-        self.button.setStyleSheet(theme.button_css(primary=True))
+        self.button.setStyleSheet(theme.button_css("primary"))
 
         self.layout.addWidget(self.card, 1)
         self.layout.addWidget(self.status_label)
@@ -159,9 +190,23 @@ class ItemsAdd(QWidget):
     def connections(self):
         self.button.clicked.connect(self.on_add_item)
 
+    @staticmethod
+    def _parse_stock_code(text: str) -> str:
+        text = text.strip()
+        if not text:
+            return text
+        try:
+            parsed = urlparse(text)
+            if parsed.scheme in ("http", "https") and parsed.netloc:
+                qs = parse_qs(parsed.query)
+                return qs.get("stockcode", [text])[0]
+        except Exception:
+            pass
+        return text
+
     def on_add_item(self):
         name = self.item_name.text().strip()
-        stock_code = self.item_stock_code.text().strip()
+        stock_code = self._parse_stock_code(self.item_stock_code.text())
         tags = [t.strip() for t in self.item_tags.text().split(",") if t.strip()]
 
         if not name:
@@ -169,14 +214,21 @@ class ItemsAdd(QWidget):
             self.status_label.setText("Please enter an item name")
             return
 
+        sold_by_weight = self.weight_cb.isChecked()
+        default_weight_kg = round(self.default_weight_spin.value(), 2) if sold_by_weight else None
+
         if self._edit_name:
             i = Item()
             if name != self._edit_name:
                 i.update(self._edit_name, "name", name)
             i.update(name, "tags", tags)
             i.update(name, "is_long_term", self.long_term_cb.isChecked())
+            i.update(name, "sold_by_weight", sold_by_weight)
+            i.update(name, "default_weight_kg", default_weight_kg)
         else:
-            Item().create(name, stock_code, tags)
+            Item().create(name, stock_code, tags,
+                          sold_by_weight=sold_by_weight,
+                          default_weight_kg=default_weight_kg)
             if self.long_term_cb.isChecked():
                 Item().update(name, "is_long_term", True)
 

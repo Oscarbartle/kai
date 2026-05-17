@@ -3,13 +3,23 @@ from kai.objects.recipe import Recipe
 from kai.objects.shopping_list import ShoppingList
 from kai.ui import theme
 from kai.utils.format_date import format_date
+from kai.ui.tokens import (
+    SPACE_SM, SPACE_MD,
+    RADIUS_SM, RADIUS_MD, BORDER_W,
+    H_CARD, H_FEATURE, H_ROW, H_ICON_BTN,
+    FS_BODY, FS_META,
+    FW_BOLD, FW_MEDIUM,
+)
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QPushButton, QStyle, QStyleOption, QSpinBox,
 )
-from PySide6.QtGui import QPainter, QCursor
-from PySide6.QtCore import Qt
+from PySide6.QtGui import QPainter, QCursor, QIcon
+from PySide6.QtCore import Qt, QSize
+from pathlib import Path
+
+_ICONS = Path(__file__).resolve().parent.parent.parent.parent / "icons"
 
 
 class RecipePickerCard(QWidget):
@@ -30,45 +40,47 @@ class RecipePickerCard(QWidget):
         self.cost, self.cost_full = self._calc_cost()
 
         self.setObjectName("recipe_pick_card")
-        self.setMinimumHeight(72)
-        self.setMaximumHeight(72)
+        self.setMinimumHeight(H_FEATURE)
+        self.setMaximumHeight(H_FEATURE)
 
         t = theme.theme()
-        self.setStyleSheet(theme.inline_card_css("recipe_pick_card", radius=8))
+        self.setStyleSheet(theme.inline_card_css("recipe_pick_card", radius=RADIUS_MD))
 
         layout = QGridLayout()
-        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setContentsMargins(SPACE_MD, SPACE_SM, SPACE_MD, SPACE_SM)
         layout.setSpacing(4)
         self.setLayout(layout)
 
         name_label = QLabel(f"<b>{self._name}</b>")
-        name_label.setStyleSheet(f"color: {t.text}; font-size: 13px;")
+        name_label.setStyleSheet(f"color: {t.text}; font-size: {FS_BODY}px;")
         layout.addWidget(name_label, 0, 0)
 
         tags_text = ", ".join(self.tags) if self.tags else ""
         if tags_text:
             tags_label = QLabel(f"<i>{tags_text}</i>")
-            tags_label.setStyleSheet(f"color: {t.text_faint}; font-size: 11px; padding-left: 4px;")
+            tags_label.setStyleSheet(
+                f"color: {t.text_faint}; font-size: {FS_META}px; padding-left: 4px;"
+            )
             layout.addWidget(tags_label, 0, 1)
 
         layout.setColumnStretch(1, 1)
 
         info_row = QHBoxLayout()
-        info_row.setSpacing(10)
+        info_row.setSpacing(SPACE_SM)
 
-        cost_text = f"${self.cost}" if self.cost > 0 else "N/A"
-        if self.cost > 0 and self.cost_full != self.cost:
-            cost_text += f" <span style='color:{t.text_dim};font-size:11px;'>(${self.cost_full} w/LT)</span>"
+        cost_text = f"${self.cost:.2f}" if self.cost > 0 else "N/A"
         cost_label = QLabel(f"<b>{cost_text}</b>")
-        cost_label.setStyleSheet(f"color: {t.accent}; font-size: 12px;")
+        cost_label.setStyleSheet(f"color: {t.accent}; font-size: {FS_BODY}px;")
+        if self.cost > 0 and self.cost_full != self.cost:
+            cost_label.setToolTip(f"${self.cost_full:.2f} including long-term items")
         info_row.addWidget(cost_label)
 
         ing_label = QLabel(f"{len(self.ingredients)} items")
-        ing_label.setStyleSheet(f"color: {t.text_dim}; font-size: 11px;")
+        ing_label.setStyleSheet(f"color: {t.text_dim}; font-size: {FS_META}px;")
         info_row.addWidget(ing_label)
 
         serves_label = QLabel(f"Serves {self.servings}")
-        serves_label.setStyleSheet(f"color: {t.text_dim}; font-size: 11px;")
+        serves_label.setStyleSheet(f"color: {t.text_dim}; font-size: {FS_META}px;")
         info_row.addWidget(serves_label)
 
         info_row.addStretch()
@@ -86,11 +98,34 @@ class RecipePickerCard(QWidget):
         self.mult_spin.setToolTip("Multiplier")
         right_col.addWidget(self.mult_spin, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        add_btn = QPushButton("+ Add")
-        add_btn.setFixedSize(50, 30)
+        from kai.ui.widgets.nav_button import _colorize_svg
+        _SIZE = 26
+        t2 = theme.theme()
+        add_btn = QPushButton()
+        add_btn.setFixedSize(_SIZE, _SIZE)
         add_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         add_btn.setToolTip("Add to shopping list")
-        add_btn.setStyleSheet(theme.mini_primary_btn_css())
+        add_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {t2.btn_bg};
+                color: {t2.btn_fg};
+                border: none;
+                border-radius: {_SIZE // 2}px;
+                min-width: {_SIZE}px;
+                max-width: {_SIZE}px;
+                min-height: {_SIZE}px;
+                max-height: {_SIZE}px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{ background-color: {t2.btn_hover}; }}
+            QPushButton:pressed {{ background-color: {t2.btn_pressed}; }}
+        """)
+        icon = _colorize_svg(str(_ICONS / "plus.svg"), t2.accent_fg, size=16)
+        if icon:
+            add_btn.setIcon(icon)
+            add_btn.setIconSize(QSize(16, 16))
+        else:
+            add_btn.setText("+")
         add_btn.clicked.connect(self._on_click_add)
         right_col.addWidget(add_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -122,41 +157,41 @@ class SavedListCard(QWidget):
         super().__init__()
 
         self.setObjectName("saved_list_card")
-        self.setMinimumHeight(50)
-        self.setMaximumHeight(50)
+        self.setMinimumHeight(H_CARD)
+        self.setMaximumHeight(H_CARD)
 
         t = theme.theme()
-        self.setStyleSheet(theme.inline_card_css("saved_list_card", radius=8))
+        self.setStyleSheet(theme.inline_card_css("saved_list_card", radius=RADIUS_MD))
 
         layout = QHBoxLayout()
-        layout.setContentsMargins(12, 6, 10, 6)
-        layout.setSpacing(8)
+        layout.setContentsMargins(SPACE_MD, SPACE_SM, SPACE_MD, SPACE_SM)
+        layout.setSpacing(SPACE_SM)
         self.setLayout(layout)
 
         info_col = QVBoxLayout()
         info_col.setSpacing(2)
 
         name_label = QLabel(f"<b>{name}</b>")
-        name_label.setStyleSheet(f"color: {t.text}; font-size: 12px;")
+        name_label.setStyleSheet(f"color: {t.text}; font-size: {FS_BODY}px;")
         name_label.setWordWrap(True)
         info_col.addWidget(name_label)
 
         date_text = format_date(date) if date else ""
         date_label = QLabel(date_text)
-        date_label.setStyleSheet(f"color: {t.text_faint}; font-size: 10px;")
+        date_label.setStyleSheet(f"color: {t.text_faint}; font-size: {FS_META}px;")
         info_col.addWidget(date_label)
 
         layout.addLayout(info_col, 1)
 
         load_btn = QPushButton("Open")
         load_btn.setProperty("btn", "secondary")
-        load_btn.setFixedHeight(26)
+        load_btn.setFixedHeight(H_ROW)
         load_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         load_btn.clicked.connect(lambda: on_load(list_id))
         layout.addWidget(load_btn)
 
-        del_btn = QPushButton("\u2715")
-        del_btn.setFixedSize(22, 22)
+        del_btn = QPushButton("✕")
+        del_btn.setFixedSize(H_ICON_BTN, H_ICON_BTN)
         del_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         del_btn.setToolTip("Delete list")
         del_btn.setStyleSheet(theme.delete_btn_css())
@@ -177,26 +212,23 @@ class CartEntry(QWidget):
         super().__init__()
 
         self.setObjectName("cart_entry")
-        self.setFixedHeight(30)
+        self.setFixedHeight(H_ROW)
 
         t = theme.theme()
-        self.setStyleSheet(theme.surface_row_css("cart_entry"))
+        self.setStyleSheet(theme.surface_row_css("cart_entry", radius=RADIUS_SM))
 
         layout = QHBoxLayout()
-        layout.setContentsMargins(8, 2, 4, 2)
-        layout.setSpacing(6)
+        layout.setContentsMargins(SPACE_SM, 0, 4, 0)
+        layout.setSpacing(SPACE_SM)
         self.setLayout(layout)
 
         label = QLabel(recipe_name)
-        label.setStyleSheet(f"color: {t.text}; font-size: 12px;")
-        layout.addWidget(label, 1)
-
+        label.setStyleSheet(f"color: {t.text}; font-size: {FS_BODY}px;")
         doc = Recipe().get_recipe_details(recipe_name)
         base_servings = doc.get("servings", 1) if doc else 1
         total_servings = base_servings * multiplier
-        serves_label = QLabel(f"Serves {total_servings}")
-        serves_label.setStyleSheet(f"color: {t.text_dim}; font-size: 11px;")
-        layout.addWidget(serves_label)
+        label.setToolTip(f"Serves {total_servings}")
+        layout.addWidget(label, 1)
 
         if multiplier > 1:
             count_badge = QLabel(f"{multiplier}")
@@ -205,8 +237,8 @@ class CartEntry(QWidget):
             count_badge.setStyleSheet(theme.badge_css(t.accent, t.accent_fg))
             layout.addWidget(count_badge)
 
-        rm_btn = QPushButton("\u2715")
-        rm_btn.setFixedSize(18, 18)
+        rm_btn = QPushButton("✕")
+        rm_btn.setFixedSize(H_ICON_BTN, H_ICON_BTN)
         rm_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         rm_btn.setStyleSheet(theme.remove_btn_css())
         rm_btn.clicked.connect(lambda: on_remove(recipe_name))
@@ -222,33 +254,41 @@ class CartEntry(QWidget):
 class ExtraItemEntry(QWidget):
     """Shows an individual item added to the cart with remove button."""
 
-    def __init__(self, item_name, units, on_remove):
+    def __init__(self, item_name, units, on_remove, weight_kg=None):
         super().__init__()
 
         self.setObjectName("extra_item_entry")
-        self.setFixedHeight(30)
+        self.setFixedHeight(H_ROW)
 
         t = theme.theme()
-        self.setStyleSheet(theme.surface_row_css("extra_item_entry"))
+        self.setStyleSheet(theme.surface_row_css("extra_item_entry", radius=RADIUS_SM))
 
         layout = QHBoxLayout()
-        layout.setContentsMargins(8, 2, 4, 2)
-        layout.setSpacing(6)
+        layout.setContentsMargins(SPACE_SM, 0, 4, 0)
+        layout.setSpacing(SPACE_SM)
         self.setLayout(layout)
 
         label = QLabel(item_name)
-        label.setStyleSheet(f"color: {t.text}; font-size: 12px;")
+        label.setStyleSheet(f"color: {t.text}; font-size: {FS_BODY}px;")
         layout.addWidget(label, 1)
 
-        if units > 1:
+        if weight_kg is not None:
+            w = weight_kg
+            w_str = f"{w:.2f} kg" if w != int(w) else f"{int(w)} kg"
+            count_badge = QLabel(w_str)
+            count_badge.setFixedHeight(22)
+            count_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            count_badge.setStyleSheet(theme.badge_css(t.text_dim, t.bg))
+            layout.addWidget(count_badge)
+        elif units > 1:
             count_badge = QLabel(f"{units}")
             count_badge.setFixedSize(22, 22)
             count_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             count_badge.setStyleSheet(theme.badge_css(t.text_dim, t.bg))
             layout.addWidget(count_badge)
 
-        rm_btn = QPushButton("\u2715")
-        rm_btn.setFixedSize(18, 18)
+        rm_btn = QPushButton("✕")
+        rm_btn.setFixedSize(H_ICON_BTN, H_ICON_BTN)
         rm_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         rm_btn.setStyleSheet(theme.remove_btn_css())
         rm_btn.clicked.connect(lambda: on_remove(item_name))

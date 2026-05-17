@@ -6,105 +6,147 @@ from kai.objects.item import Item
 from kai.objects.shopping_list import ShoppingList
 from kai.ui import theme
 from kai.ui.refresh_worker import run_refresh
-from kai.ui.widgets.collapsible_section import CollapsibleSection, StyledSplitter
 from kai.ui.layouts.shopping_list.cards import CartEntry, ExtraItemEntry
 from kai.ui.widgets.shopping_item import ShoppingItem
 from kai.core import settings as app_settings
+from kai.ui.tokens import (
+    SPACE_XS, SPACE_SM, SPACE_MD, SPACE_LG,
+    RADIUS_SM, RADIUS_MD, BORDER_W,
+    H_ROW,
+    FS_BODY, FS_META, FS_TINY,
+    FW_BOLD, FW_MEDIUM,
+)
 
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QSplitter,
     QLabel,
     QLineEdit,
     QPushButton,
     QScrollArea,
     QCheckBox,
     QApplication,
+    QFrame,
 )
 from PySide6.QtGui import QCursor
 from PySide6.QtCore import Qt
 
 
 class ShoppingListCartMixin:
-    # ── right panel: cart + generated list ─────────────────────── #
+    # ── right panel: cart + generated list + long-term ─────────── #
 
     def _build_right_panel(self):
         self.right_panel = QWidget()
         self.right_panel.setObjectName("page_panel")
         right_layout = QVBoxLayout(self.right_panel)
-        right_layout.setContentsMargins(16, 16, 16, 16)
-        right_layout.setSpacing(12)
+        right_layout.setContentsMargins(SPACE_LG, SPACE_LG, SPACE_LG, SPACE_LG)
+        right_layout.setSpacing(SPACE_SM)
 
         t = theme.theme()
 
+        # ── header ───────────────────────────────────────────── #
         cart_label = QLabel("Shopping List")
         cart_label.setProperty("role", "heading")
         right_layout.addWidget(cart_label)
 
         top_row = QHBoxLayout()
-        top_row.setSpacing(8)
+        top_row.setSpacing(SPACE_SM)
 
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("List name (optional)")
-        self.name_input.setFixedHeight(30)
         top_row.addWidget(self.name_input, 1)
 
-        self.save_button = QPushButton("Save List")
+        self.save_button = QPushButton("Save")
         self.save_button.setProperty("btn", "primary")
-        self.save_button.setFixedHeight(30)
         self.save_button.setEnabled(False)
         top_row.addWidget(self.save_button)
 
         self.export_button = QPushButton("Copy")
         self.export_button.setProperty("btn", "secondary")
-        self.export_button.setFixedHeight(30)
         self.export_button.setToolTip("Copy list to clipboard")
         self.export_button.setEnabled(False)
         top_row.addWidget(self.export_button)
 
-        self.links_button = QPushButton("Links")
+        self.links_button = QPushButton("Cart")
         self.links_button.setProperty("btn", "secondary")
-        self.links_button.setFixedHeight(30)
         self.links_button.setEnabled(False)
-        self.links_button.setToolTip("Copy Woolworths links for all items")
+        self.links_button.setToolTip("Add items to Woolworths trolley")
         top_row.addWidget(self.links_button)
 
         self.clear_button = QPushButton("Clear")
         self.clear_button.setProperty("btn", "secondary")
-        self.clear_button.setFixedHeight(30)
         self.clear_button.setEnabled(False)
         self.clear_button.setToolTip("Clear the current shopping list")
         top_row.addWidget(self.clear_button)
 
         right_layout.addLayout(top_row)
 
-        items_header = QHBoxLayout()
-        items_heading = QLabel("Items")
-        items_heading.setStyleSheet(f"color: {t.text}; font-size: 13px; font-weight: bold;")
-        items_header.addWidget(items_heading)
-        items_header.addStretch()
+        # ── vertical splitter: Cart / Shopping List / Long-term ── #
+        self.v_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.v_splitter.setChildrenCollapsible(False)
 
+        # — cart pane —
+        cart_pane = QWidget()
+        cart_pane.setMinimumHeight(80)
+        cart_pane_layout = QVBoxLayout(cart_pane)
+        cart_pane_layout.setContentsMargins(0, SPACE_SM, 0, 0)
+        cart_pane_layout.setSpacing(SPACE_SM)
+
+        cart_header = QHBoxLayout()
+        cart_heading = QLabel("Cart")
+        cart_heading.setStyleSheet(
+            f"color: {t.text_dim}; font-size: {FS_META}px; font-weight: {FW_BOLD}; "
+            "letter-spacing: 0.6px; text-transform: uppercase;"
+        )
+        cart_header.addWidget(cart_heading)
+        cart_header.addStretch()
+        self._cart_count_label = QLabel("")
+        self._cart_count_label.setStyleSheet(f"color: {t.text_faint}; font-size: {FS_META}px;")
+        cart_header.addWidget(self._cart_count_label)
+        cart_pane_layout.addLayout(cart_header)
+
+        self.cart_scroll = QScrollArea()
+        self.cart_scroll.setWidgetResizable(True)
+        self.cart_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        cart_scroll_widget = QWidget()
+        cart_scroll_widget.setStyleSheet("background: transparent;")
+        self.cart_layout = QVBoxLayout(cart_scroll_widget)
+        self.cart_layout.setContentsMargins(0, 2, 0, 2)
+        self.cart_layout.setSpacing(4)
+        self.cart_layout.addStretch()
+        self.cart_scroll.setWidget(cart_scroll_widget)
+        self.empty_cart_label = QLabel("Add recipes or items to get started")
+        self.empty_cart_label.setProperty("role", "faint")
+        self.cart_layout.insertWidget(0, self.empty_cart_label)
+        cart_pane_layout.addWidget(self.cart_scroll, 1)
+
+        # — shopping list pane —
+        list_pane = QWidget()
+        list_pane.setMinimumHeight(80)
+        list_pane_layout = QVBoxLayout(list_pane)
+        list_pane_layout.setContentsMargins(0, SPACE_SM, 0, 0)
+        list_pane_layout.setSpacing(SPACE_SM)
+
+        list_header = QHBoxLayout()
+        list_heading = QLabel("Shopping List")
+        list_heading.setStyleSheet(
+            f"color: {t.text_dim}; font-size: {FS_META}px; font-weight: {FW_BOLD}; "
+            "letter-spacing: 0.6px; text-transform: uppercase;"
+        )
+        list_header.addWidget(list_heading)
+        list_header.addStretch()
         self.serves_label = QLabel("")
-        self.serves_label.setStyleSheet(f"color: {t.text_dim}; font-size: 12px;")
-        items_header.addWidget(self.serves_label)
-
+        self.serves_label.setStyleSheet(f"color: {t.text_dim}; font-size: {FS_META}px;")
+        list_header.addWidget(self.serves_label)
         self.count_label = QLabel("")
         self.count_label.setProperty("role", "dim")
-        items_header.addWidget(self.count_label)
-
+        list_header.addWidget(self.count_label)
         self.total_label = QLabel("")
         self.total_label.setProperty("role", "price")
-        items_header.addWidget(self.total_label)
-        right_layout.addLayout(items_header)
-
-        sep = QWidget()
-        sep.setFixedHeight(1)
-        sep.setStyleSheet(theme.divider_line_css())
-        right_layout.addWidget(sep)
-
-        self.right_splitter = StyledSplitter(Qt.Orientation.Vertical)
-        self.right_splitter.setHandleWidth(16)
+        list_header.addWidget(self.total_label)
+        list_pane_layout.addLayout(list_header)
 
         self.items_scroll = QScrollArea()
         self.items_scroll.setWidgetResizable(True)
@@ -112,56 +154,88 @@ class ShoppingListCartMixin:
         items_scroll_widget = QWidget()
         items_scroll_widget.setStyleSheet("background: transparent;")
         self.items_scroll_layout = QVBoxLayout(items_scroll_widget)
-        self.items_scroll_layout.setContentsMargins(0, 4, 0, 4)
+        self.items_scroll_layout.setContentsMargins(0, SPACE_XS, 0, SPACE_XS)
         self.items_scroll_layout.setSpacing(4)
         self.items_scroll_layout.addStretch()
         self.items_scroll.setWidget(items_scroll_widget)
-        self.right_splitter.addWidget(self.items_scroll)
+        list_pane_layout.addWidget(self.items_scroll, 1)
+        self.v_splitter.addWidget(list_pane)
+        self.v_splitter.addWidget(cart_pane)
 
-        self.bottom_scroll = QScrollArea()
-        self.bottom_scroll.setWidgetResizable(True)
-        self.bottom_scroll.setStyleSheet("QScrollArea { border: none; }")
-        bottom_scroll_widget = QWidget()
-        bottom_scroll_widget.setStyleSheet("background: transparent;")
-        bottom_scroll_layout = QVBoxLayout(bottom_scroll_widget)
-        bottom_scroll_layout.setContentsMargins(0, 0, 0, 0)
-        bottom_scroll_layout.setSpacing(6)
+        # — long-term pane —
+        lt_pane = QWidget()
+        lt_pane.setMinimumHeight(60)
+        lt_pane_layout = QVBoxLayout(lt_pane)
+        lt_pane_layout.setContentsMargins(0, SPACE_SM, 0, 0)
+        lt_pane_layout.setSpacing(SPACE_SM)
 
-        self.cart_section = CollapsibleSection("Cart", collapsed=True)
-        self.cart_layout = self.cart_section.content_layout
-        self.empty_cart_label = QLabel("Add recipes or items to get started")
-        self.empty_cart_label.setProperty("role", "faint")
-        self.cart_layout.addWidget(self.empty_cart_label)
-        bottom_scroll_layout.addWidget(self.cart_section)
+        lt_header = QHBoxLayout()
+        lt_heading = QLabel("Long-term Items")
+        lt_heading.setStyleSheet(
+            f"color: {t.text_dim}; font-size: {FS_META}px; font-weight: {FW_BOLD}; "
+            "letter-spacing: 0.6px; text-transform: uppercase;"
+        )
+        lt_header.addWidget(lt_heading)
+        lt_header.addStretch()
+        lt_hint = QLabel("Uncheck to add to list")
+        lt_hint.setStyleSheet(f"color: {t.text_faint}; font-size: {FS_META}px;")
+        lt_header.addWidget(lt_hint)
+        lt_pane_layout.addLayout(lt_header)
 
-        self.lt_section = CollapsibleSection("Long-term Items", collapsed=True)
-        self.lt_layout = self.lt_section.content_layout
+        self.lt_scroll = QScrollArea()
+        self.lt_scroll.setWidgetResizable(True)
+        self.lt_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        lt_scroll_widget = QWidget()
+        lt_scroll_widget.setStyleSheet("background: transparent;")
+        self.lt_layout = QVBoxLayout(lt_scroll_widget)
+        self.lt_layout.setContentsMargins(0, 2, 0, 2)
+        self.lt_layout.setSpacing(4)
+        self.lt_layout.addStretch()
+        self.lt_scroll.setWidget(lt_scroll_widget)
         self.lt_empty_label = QLabel("No long-term items needed")
         self.lt_empty_label.setProperty("role", "faint")
-        self.lt_layout.addWidget(self.lt_empty_label)
-        bottom_scroll_layout.addWidget(self.lt_section)
-        bottom_scroll_layout.addStretch()
+        self.lt_layout.insertWidget(0, self.lt_empty_label)
+        lt_pane_layout.addWidget(self.lt_scroll, 1)
+        self.v_splitter.addWidget(lt_pane)
 
-        self.bottom_scroll.setWidget(bottom_scroll_widget)
-        self.right_splitter.addWidget(self.bottom_scroll)
-        self.right_splitter.setSizes([9999, 220])
+        self.v_splitter.setHandleWidth(6)
+        self.v_splitter.setStretchFactor(0, 1)
+        self.v_splitter.setStretchFactor(1, 3)
+        self.v_splitter.setStretchFactor(2, 1)
 
-        right_layout.addWidget(self.right_splitter, 1)
-        self.layout.addWidget(self.right_panel, 0, 1)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, lambda: self.v_splitter.setSizes([400, 150, 120]))
+
+        right_layout.addWidget(self.v_splitter, 1)
+        self.h_splitter.insertWidget(1, self.right_panel)
+        self.h_splitter.setStretchFactor(1, 3)
+
+    def _divider(self) -> QWidget:
+        sep = QWidget()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet(theme.divider_line_css())
+        return sep
 
     # ── cart management ────────────────────────────────────────── #
 
-    def _add_extra_item(self, item_name, units):
+    def _add_extra_item(self, item_name, units=1, weight_kg=None):
         item_obj = Item()
         if item_name in item_obj.get_long_term_items():
             self.lt_have[item_name] = False
 
         for entry in self.extra_items:
             if entry["item_name"] == item_name:
-                entry["units"] += units
+                if weight_kg is not None:
+                    entry["weight_kg"] = round(entry.get("weight_kg", 0) + weight_kg, 3)
+                else:
+                    entry["units"] = entry.get("units", 0) + units
                 self._refresh_cart()
                 return
-        self.extra_items.append({"item_name": item_name, "units": units})
+
+        if weight_kg is not None:
+            self.extra_items.append({"item_name": item_name, "weight_kg": round(weight_kg, 3)})
+        else:
+            self.extra_items.append({"item_name": item_name, "units": units})
         self._refresh_cart()
 
     def _refresh_recipe_metadata(self, recipe_name):
@@ -169,7 +243,7 @@ class ShoppingListCartMixin:
         if not doc:
             return
         names = [ing.get("item_name") for ing in doc.get("ingredients", []) if ing.get("item_name")]
-        run_refresh(names, on_done=self.state.items_updated, parent=self)
+        run_refresh(names, on_done=self.state.items_updated, delay=2.0)
 
     def _add_recipe_to_cart(self, recipe_name, multiplier):
         self._refresh_recipe_metadata(recipe_name)
@@ -196,6 +270,7 @@ class ShoppingListCartMixin:
         self._refresh_cart()
 
     def _refresh_cart(self):
+        # clear existing cart widgets (keep stretch at end)
         while self.cart_layout.count():
             child = self.cart_layout.takeAt(0)
             if child.widget():
@@ -208,29 +283,32 @@ class ShoppingListCartMixin:
             self.empty_cart_label = QLabel("Add recipes or items to get started")
             self.empty_cart_label.setProperty("role", "faint")
             self.cart_layout.addWidget(self.empty_cart_label)
+            self.cart_layout.addStretch()
             self.save_button.setEnabled(False)
             self.clear_button.setEnabled(False)
+            self._cart_count_label.setText("")
         else:
-            if self.recipe_entries:
-                recipe_header = QLabel("Recipes")
-                recipe_header.setStyleSheet(
-                    f"color: {t.text_dim}; font-size: 11px; font-weight: bold; padding: 2px 0;"
-                )
-                self.cart_layout.addWidget(recipe_header)
-                for entry in self.recipe_entries:
-                    card = CartEntry(entry["recipe_name"], entry["multiplier"], self._remove_from_cart)
-                    self.cart_layout.addWidget(card)
+            total = len(self.recipe_entries) + len(self.extra_items)
+            self._cart_count_label.setText(
+                f"{len(self.recipe_entries)} recipe{'s' if len(self.recipe_entries) != 1 else ''}"
+                + (f" · {len(self.extra_items)} item{'s' if len(self.extra_items) != 1 else ''}"
+                   if self.extra_items else "")
+            )
 
-            if self.extra_items:
-                item_header = QLabel("Items")
-                item_header.setStyleSheet(
-                    f"color: {t.text_dim}; font-size: 11px; font-weight: bold; padding: 2px 0;"
-                )
-                self.cart_layout.addWidget(item_header)
-                for entry in self.extra_items:
-                    card = ExtraItemEntry(entry["item_name"], entry["units"], self._remove_extra_item)
-                    self.cart_layout.addWidget(card)
+            for entry in self.recipe_entries:
+                card = CartEntry(entry["recipe_name"], entry["multiplier"], self._remove_from_cart)
+                self.cart_layout.addWidget(card)
 
+            for entry in self.extra_items:
+                card = ExtraItemEntry(
+                    entry["item_name"],
+                    entry.get("units", 1),
+                    self._remove_extra_item,
+                    weight_kg=entry.get("weight_kg"),
+                )
+                self.cart_layout.addWidget(card)
+
+            self.cart_layout.addStretch()
             self.save_button.setEnabled(True)
             self.clear_button.setEnabled(True)
 
@@ -333,13 +411,10 @@ class ShoppingListCartMixin:
             self.lt_empty_label = QLabel("No long-term items needed")
             self.lt_empty_label.setProperty("role", "faint")
             self.lt_layout.addWidget(self.lt_empty_label)
+            self.lt_layout.addStretch()
             return
 
         t = theme.theme()
-
-        hint = QLabel("Uncheck items you need to buy")
-        hint.setStyleSheet(f"color: {t.text_faint}; font-size: 11px; padding-bottom: 2px;")
-        self.lt_layout.addWidget(hint)
 
         for lt_item in self.lt_items:
             name = lt_item["item_name"]
@@ -347,28 +422,34 @@ class ShoppingListCartMixin:
 
             row = QWidget()
             row.setObjectName("lt_check_row")
-            row.setFixedHeight(34)
-            row.setStyleSheet(theme.surface_row_css("lt_check_row"))
+            row.setFixedHeight(H_ROW)
+            row.setStyleSheet(theme.surface_row_css("lt_check_row", radius=RADIUS_SM))
             row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(8, 2, 8, 2)
-            row_layout.setSpacing(6)
+            row_layout.setContentsMargins(SPACE_SM, 0, SPACE_SM, 0)
+            row_layout.setSpacing(SPACE_SM)
 
             cb = QCheckBox()
             cb.setChecked(have)
-            cb.setToolTip("I have this")
+            cb.setToolTip("I have this — uncheck to add to shopping list")
             cb.setStyleSheet(theme.checkbox_css())
             cb.stateChanged.connect(lambda state, n=name: self._on_lt_toggled(n, bool(state)))
             row_layout.addWidget(cb)
 
             name_label = QLabel(name)
-            style = f"color: {t.text_faint}; text-decoration: line-through;" if have else f"color: {t.text};"
-            name_label.setStyleSheet(f"{style} font-size: 12px;")
+            style = (
+                f"color: {t.text_faint}; text-decoration: line-through;"
+                if have else
+                f"color: {t.text};"
+            )
+            name_label.setStyleSheet(f"{style} font-size: {FS_BODY}px;")
             row_layout.addWidget(name_label, 1)
 
             units = lt_item.get("units_needed", 1)
             if units > 1:
                 qty_label = QLabel(f"x{units}")
-                qty_label.setStyleSheet(f"color: {t.text}; font-size: 12px; font-weight: bold;")
+                qty_label.setStyleSheet(
+                    f"color: {t.text}; font-size: {FS_BODY}px; font-weight: {FW_BOLD};"
+                )
                 row_layout.addWidget(qty_label)
 
             amount = lt_item.get("amount")
@@ -376,24 +457,18 @@ class ShoppingListCartMixin:
             if amount and amount_unit and amount_unit != "ea":
                 amt = int(amount) if amount == int(amount) else amount
                 amt_label = QLabel(f"{amt}{amount_unit}")
-                amt_label.setStyleSheet(f"color: {t.text_dim}; font-size: 11px;")
+                amt_label.setStyleSheet(f"color: {t.text_dim}; font-size: {FS_META}px;")
                 row_layout.addWidget(amt_label)
 
             price = lt_item.get("price")
             if price:
                 price_label = QLabel(f"${price}")
-                price_label.setStyleSheet(f"color: {t.accent}; font-size: 12px;")
+                price_label.setStyleSheet(f"color: {t.accent}; font-size: {FS_META}px;")
                 row_layout.addWidget(price_label)
 
-            status_label = QLabel("have" if have else "need")
-            status_label.setStyleSheet(
-                f"color: {t.text_faint}; font-size: 10px; font-style: italic;"
-                if have
-                else f"color: {t.danger}; font-size: 10px; font-weight: bold;"
-            )
-            row_layout.addWidget(status_label)
-
             self.lt_layout.addWidget(row)
+
+        self.lt_layout.addStretch()
 
     def _on_lt_toggled(self, item_name, have):
         self.lt_have[item_name] = have
@@ -415,14 +490,14 @@ class ShoppingListCartMixin:
         for i, tag in enumerate(sorted(grouped.keys())):
             if i > 0:
                 spacer = QWidget()
-                spacer.setFixedHeight(8)
+                spacer.setFixedHeight(SPACE_SM)
                 spacer.setStyleSheet("background: transparent;")
                 self.items_scroll_layout.addWidget(spacer)
 
             tag_label = QLabel(tag)
             tag_label.setStyleSheet(
-                f"color: {t.text_dim}; font-size: 12px; font-weight: bold; "
-                f"padding: 4px 0px 2px 2px;"
+                f"color: {t.text_dim}; font-size: {FS_META}px; font-weight: {FW_BOLD}; "
+                f"padding: {SPACE_XS}px 0px 2px 2px;"
             )
             self.items_scroll_layout.addWidget(tag_label)
 
@@ -446,7 +521,7 @@ class ShoppingListCartMixin:
         all_lt = lt_in_list + lt_not_in_list
         if all_lt > 0 and round(all_lt, 2) != 0:
             label = (
-                f"  <span style='color:{t.text_dim};font-size:11px;'>"
+                f"  <span style='color:{t.text_dim};font-size:{FS_META}px;'>"
                 f"(${round(total + all_lt, 2)} w/LT)</span>&nbsp;&nbsp;&nbsp;&nbsp;"
                 f"Est. Total: ${round(total + lt_in_list, 2)}"
             )
@@ -536,10 +611,26 @@ class ShoppingListCartMixin:
 
         from kai.core.woolworths_cart import get_session, check_auth, start_cart_worker
         from kai.ui.widgets.cart_confirm_dialog import CartConfirmDialog, CartProgressDialog
+        from kai.ui.widgets.lt_cart_wizard import LtCartWizard
 
         item_obj = Item()
+
+        # ── Step 1: long-term items wizard ───────────────────────── #
+        extra_lt_items = []
+        if self.lt_items:
+            wizard = LtCartWizard(self.lt_items, parent=self)
+            if wizard.exec() != LtCartWizard.DialogCode.Accepted:
+                return
+            extra_lt_items = wizard.selected_items
+
+        # ── Step 2: build cart items list ────────────────────────── #
+        all_items = list(self.preview_items) + [
+            it for it in extra_lt_items
+            if not any(p["item_name"] == it["item_name"] for p in self.preview_items)
+        ]
+
         cart_items = []
-        for item in self.preview_items:
+        for item in all_items:
             details = item_obj.get_item_details(item["item_name"])
             stock_code = details.get("stock_code") if details else None
             cart_items.append(
@@ -559,6 +650,10 @@ class ShoppingListCartMixin:
         accepted = confirm.accepted_items
         if not accepted:
             return
+
+        # record order history (once per item per day)
+        from kai.objects.order_history import OrderHistory
+        OrderHistory().record([i["name"] for i in accepted])
 
         session = get_session()
         if session is None or not check_auth(session):

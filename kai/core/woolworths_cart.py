@@ -21,6 +21,7 @@ from kai.core import settings as app_settings
 
 BASE_URL = "https://www.woolworths.co.nz"
 TROLLEY_ADD_URL = f"{BASE_URL}/api/v1/trolleys/my/items"
+_REQUEST_TIMEOUT = 10
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/115.0",
@@ -163,8 +164,11 @@ def _find_cookie_file(browser: str) -> str | None:
     for pattern in patterns:
         matches = glob.glob(os.path.expanduser(pattern))
         if matches:
-            # prefer the most recently modified profile
-            return max(matches, key=os.path.getmtime)
+            try:
+                # prefer the most recently modified profile
+                return max(matches, key=os.path.getmtime)
+            except OSError:
+                return matches[0]
     return None
 
 
@@ -199,7 +203,7 @@ def _session_for_browser(browser: str):
         }
         loader = loaders.get(browser, browser_cookie3.chrome)
         jar = loader(cookie_file=cookie_file)
-    except Exception:
+    except (OSError, ValueError, KeyError):
         return None
 
     session = req_lib.Session()
@@ -256,10 +260,10 @@ def check_auth(session: req_lib.Session) -> bool:
 
     # Cookie names can change; fall back to a lightweight auth probe.
     try:
-        r = session.get(f"{BASE_URL}/api/v1/customers/my/profile", timeout=8)
+        r = session.get(f"{BASE_URL}/api/v1/customers/my/profile", timeout=_REQUEST_TIMEOUT)
         if r.status_code == 200:
             return True
-    except Exception:
+    except req_lib.RequestException:
         pass
 
     return False
@@ -278,11 +282,11 @@ def add_item_to_trolley(session: req_lib.Session, stock_code: str, qty: int) -> 
         "pricingUnit": "Each",
     }
     try:
-        r = session.post(TROLLEY_ADD_URL, json=payload, headers=headers, timeout=10)
+        r = session.post(TROLLEY_ADD_URL, json=payload, headers=headers, timeout=_REQUEST_TIMEOUT)
         if r.status_code not in (200, 201):
             return False
         return r.json().get("isSuccessful", False)
-    except Exception:
+    except req_lib.RequestException:
         return False
 
 
@@ -345,8 +349,9 @@ def start_cart_worker(
         if worker in _active_cart_threads:
             _active_cart_threads.remove(worker)
 
-    worker.finished_adding.connect(_cleanup)
-    worker.auth_failed.connect(_cleanup)
+    # Qt's finished signal fires after the thread has fully stopped — safe to
+    # drop the Python reference here without risking a destroy-while-running crash.
+    worker.finished.connect(_cleanup)
     _active_cart_threads.append(worker)
     worker.start()
     return worker

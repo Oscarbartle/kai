@@ -4,6 +4,13 @@ from kai.objects.shopping_list import ShoppingList
 from kai.utils.format_date import format_date
 from kai.ui import theme
 from kai.ui.refresh_worker import run_refresh
+from kai.ui.tokens import (
+    SPACE_SM, SPACE_MD, SPACE_LG,
+    RADIUS_MD, BORDER_W,
+    H_CARD, H_ICON_BTN,
+    FS_BODY, FS_META, FS_HEADING,
+    FW_BOLD,
+)
 
 from datetime import datetime, timedelta
 from PySide6.QtWidgets import (
@@ -26,11 +33,12 @@ def invalidate_recipe_card_cache():
 class RecipeDetails(QWidget):
     recipe_clicked = Signal(str)
 
-    def __init__(self, recipe_name, state=None):
+    def __init__(self, recipe_name, state=None, doc=None):
         super().__init__()
 
         self.state = state
-        doc = Recipe().get_recipe_details(recipe_name)
+        if doc is None:
+            doc = Recipe().get_recipe_details(recipe_name)
 
         if doc is None:
             print(f"Recipe {recipe_name} not found")
@@ -50,8 +58,8 @@ class RecipeDetails(QWidget):
         self.total_savings = self.savings_regular + self.savings_lt
 
         self.setObjectName("recipe_card")
-        self.setMinimumHeight(62)
-        self.setMaximumHeight(62)
+        self.setMinimumHeight(H_CARD)
+        self.setMaximumHeight(H_CARD)
 
         self.set_stylesheet()
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -124,15 +132,12 @@ class RecipeDetails(QWidget):
 
     def set_stylesheet(self):
         t = theme.theme()
-        if self.is_favourite:
-            border_color = t.accent
-        else:
-            border_color = t.border
+        border_color = t.accent if self.is_favourite else t.border
         self.setStyleSheet(f"""
             QWidget#recipe_card {{
                 background-color: {t.card};
-                border-radius: 8px;
-                border: 2px solid {border_color};
+                border-radius: {RADIUS_MD}px;
+                border: {BORDER_W}px solid {border_color};
             }}
         """)
 
@@ -144,113 +149,119 @@ class RecipeDetails(QWidget):
 
     def layouts(self):
         self.grid_layout = QGridLayout()
-        self.grid_layout.setContentsMargins(10, 6, 10, 6)
-        self.grid_layout.setSpacing(5)
+        self.grid_layout.setContentsMargins(SPACE_MD, SPACE_SM, SPACE_MD, SPACE_SM)
+        self.grid_layout.setSpacing(4)
+        self.grid_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.setLayout(self.grid_layout)
 
     def add_widgets(self):
         t = theme.theme()
 
         self.name_label = QLabel(f"<b>{self.name}</b>")
-        self.name_label.setStyleSheet(f"color: {t.text}; font-size: 13px;")
+        self.name_label.setStyleSheet(f"color: {t.text}; font-size: {FS_BODY}px;")
 
         self.tags_label = QLabel(f"<i>{', '.join(self.tags)}</i>")
-        self.tags_label.setStyleSheet(f"color: {t.text_faint}; padding-left: 4px;")
+        self.tags_label.setStyleSheet(
+            f"color: {t.text_faint}; font-size: {FS_META}px; padding-left: 4px;"
+        )
 
         self.servings_label = QLabel(f"Serves {self.servings}")
-        self.servings_label.setStyleSheet(f"color: {t.text_dim}; font-size: 12px;")
+        self.servings_label.setStyleSheet(f"color: {t.text_dim}; font-size: {FS_META}px;")
 
         ing_count = len(self.ingredients)
-        self.ing_count_label = QLabel(f"{ing_count} ingredients")
-        self.ing_count_label.setStyleSheet(f"color: {t.text_faint}; font-size: 11px;")
+        self.ing_count_label = QLabel(f"{ing_count} ingredient{'s' if ing_count != 1 else ''}")
+        self.ing_count_label.setStyleSheet(f"color: {t.text_faint}; font-size: {FS_META}px;")
 
-        lines = []
+        # Rich hover tooltip: ingredients + cost breakdown + added date
+        ing_lines = []
         for ing in self.ingredients:
             text = ing.get("item_name", "?")
             if ing.get("nominal"):
-                text = f"~  {text}"
+                text = f"~ {text}"
             else:
                 amount = ing.get("amount", 1) or 1
                 unit = ing.get("unit", "ea")
                 if unit != "ea" or amount != 1:
                     amt = int(amount) if amount == int(amount) else amount
-                    text = f"{amt}{unit}  {text}"
-            lines.append(f"\u2022 {text}")
-        self.ing_count_label.setToolTip("\n".join(lines) if lines else "No ingredients")
+                    text = f"{amt}{unit} {text}"
+            ing_lines.append(f"• {text}")
 
-        # sale savings labels (green for regular, orange for LT)
+        cost_parts = []
+        if self.estimated_cost > 0:
+            cost_parts.append(f"Est. cost: ${self.estimated_cost:.2f}")
+            if self.estimated_cost_full != self.estimated_cost:
+                cost_parts.append(f"With long-term: ${self.estimated_cost_full:.2f}")
+            if self.estimated_cost_nominal > 0:
+                cost_parts.append(f"+ ${self.estimated_cost_nominal:.2f} nominal")
+
+        tooltip_sections = []
+        if ing_lines:
+            tooltip_sections.append("\n".join(ing_lines))
+        if cost_parts:
+            tooltip_sections.append("\n".join(cost_parts))
+        if self.date_added:
+            tooltip_sections.append(f"Added: {format_date(self.date_added)}")
+        self.setToolTip("\n\n".join(tooltip_sections))
+
+        # sale savings label (green)
         self.savings_label = None
         if self.savings_regular > 0:
             self.savings_label = QLabel(f"▼ ${self.savings_regular:.2f} off")
-            self.savings_label.setStyleSheet(f"color: {t.success}; font-size: 11px; font-weight: bold;")
+            self.savings_label.setStyleSheet(
+                f"color: {t.success}; font-size: {FS_META}px; font-weight: {FW_BOLD};"
+            )
             self.savings_label.setToolTip("Savings from items on sale")
 
         # stale data warning
         if self.is_stale:
             self.stale_label = QLabel(f"⚠ {self.stale_count} stale")
-            self.stale_label.setStyleSheet(f"color: {t.danger}; font-size: 10px;")
+            self.stale_label.setStyleSheet(f"color: {t.danger}; font-size: {FS_META}px;")
+            n = self.stale_count
             self.stale_label.setToolTip(
-                f"{self.stale_count} ingredient{'s' if self.stale_count != 1 else ''} "
-                f"{'have' if self.stale_count != 1 else 'has'} data over a week old"
+                f"{n} ingredient{'s' if n != 1 else ''} "
+                f"{'have' if n != 1 else 'has'} data over a week old"
             )
         else:
             self.stale_label = None
 
-        if self.estimated_cost > 0:
-            cost_text = f"${self.estimated_cost}"
-            tooltip_parts = []
-            if self.estimated_cost_full != self.estimated_cost:
-                tooltip_parts.append(f"${self.estimated_cost_full} with long-term items")
-            if self.estimated_cost_nominal > 0:
-                tooltip_parts.append(f"+${self.estimated_cost_nominal} nominal")
-            cost_tooltip = "\n".join(tooltip_parts) if tooltip_parts else ""
-        else:
-            cost_text = "N/A"
-            cost_tooltip = ""
+        cost_text = f"${self.estimated_cost:.2f}" if self.estimated_cost > 0 else "N/A"
         self.cost_label = QLabel(f"<b>{cost_text}</b>")
-        self.cost_label.setStyleSheet(f"color: {t.accent}; font-size: 14px;")
-        if cost_tooltip:
-            self.cost_label.setToolTip(cost_tooltip)
-
-        self.date_label = QLabel(f"{format_date(self.date_added)}" if self.date_added else "")
-        self.date_label.setStyleSheet(f"color: {t.text_faint}; font-size: 11px;")
-        self.date_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.cost_label.setStyleSheet(f"color: {t.accent}; font-size: {FS_HEADING}px;")
 
         fav_color = t.accent if self.is_favourite else t.text_faint
-        self.fav_button = QPushButton("\u2605")
-        self.fav_button.setFixedSize(22, 22)
+        self.fav_button = QPushButton("★")
+        self.fav_button.setFixedSize(H_ICON_BTN, H_ICON_BTN)
         self.fav_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.fav_button.setToolTip("Favourite recipe")
         self.fav_button.setStyleSheet(theme.icon_btn_css(fav_color))
         self.fav_button.clicked.connect(self._on_fav_toggled)
 
-        self.refresh_button = QPushButton("\u21bb")
-        self.refresh_button.setFixedSize(22, 22)
+        self.refresh_button = QPushButton("↻")
+        self.refresh_button.setFixedSize(H_ICON_BTN, H_ICON_BTN)
         self.refresh_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.refresh_button.setToolTip("Refresh ingredient prices")
         self.refresh_button.setStyleSheet(theme.icon_btn_css())
         self.refresh_button.clicked.connect(self._on_refresh)
 
-        self.delete_button = QPushButton("\u2715")
-        self.delete_button.setFixedSize(22, 22)
+        self.delete_button = QPushButton("✕")
+        self.delete_button.setFixedSize(H_ICON_BTN, H_ICON_BTN)
         self.delete_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.delete_button.setToolTip("Delete recipe")
-        self.delete_button.setStyleSheet(theme.delete_btn_css(font_size=14))
+        self.delete_button.setStyleSheet(theme.delete_btn_css())
         self.delete_button.clicked.connect(self._on_delete)
 
     def add_layouts(self):
-        # Row 0: name | tags (stretch) | ★ | ↻ | date | ✕
+        # Row 0: name | tags (stretch) | ↻ | ★ | ✕
         self.grid_layout.addWidget(self.name_label, 0, 0)
         self.grid_layout.addWidget(self.tags_label, 0, 1)
         self.grid_layout.setColumnStretch(1, 1)
 
         right_row0 = QHBoxLayout()
         right_row0.setContentsMargins(0, 0, 0, 0)
-        right_row0.setSpacing(6)
+        right_row0.setSpacing(4)
         right_row0.addWidget(self.refresh_button)
         right_row0.addWidget(self.fav_button)
-        right_row0.addWidget(self.date_label)
-        right_row0.addSpacing(8)
+        right_row0.addSpacing(SPACE_SM)
         right_row0.addWidget(self.delete_button)
         self.grid_layout.addLayout(right_row0, 0, 2)
 
@@ -260,7 +271,7 @@ class RecipeDetails(QWidget):
 
         right_row1 = QHBoxLayout()
         right_row1.setContentsMargins(0, 0, 0, 0)
-        right_row1.setSpacing(12)
+        right_row1.setSpacing(SPACE_MD)
         right_row1.addStretch()
         if self.stale_label:
             right_row1.addWidget(self.stale_label)
@@ -281,12 +292,12 @@ class RecipeDetails(QWidget):
         callbacks = []
         if self.state:
             callbacks = [self.state.items_updated, self.state.recipes_updated]
-        run_refresh(names, on_done=callbacks, parent=self)
+        run_refresh(names, on_done=callbacks, delay=2.0)
 
     def _on_delete(self):
         reply = QMessageBox.question(
             self, "Delete Recipe",
-            f"Delete \u201c{self.name}\u201d?",
+            f"Delete “{self.name}”?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -302,7 +313,6 @@ class RecipeDetails(QWidget):
         super().mousePressEvent(event)
 
     def contextMenuEvent(self, event):
-        p = theme._active
         menu = QMenu(self)
         menu.setStyleSheet(theme.context_menu_css())
         edit_action = QAction("Edit Recipe", self)

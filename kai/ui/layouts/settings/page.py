@@ -1,10 +1,11 @@
 from kai.ui import theme
 from kai.core import settings as app_settings
-from kai.ui.layouts.settings.theme_editor import ThemeEditor
+from kai.ui.layouts.settings.theme_editor import ThemeEditorDialog
+from kai.ui.tokens import SPACE_SM, SPACE_LG, SPACE_MD, RADIUS_MD
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QComboBox,
+    QLineEdit, QComboBox, QSpinBox,
     QMessageBox, QFileDialog, QFrame,
 )
 from PySide6.QtCore import Qt, Signal
@@ -22,16 +23,16 @@ class SettingsPage(QWidget):
     def _build(self):
         t = theme.theme()
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 18, 20, 18)
-        root.setSpacing(12)
+        root.setContentsMargins(SPACE_LG, SPACE_LG, SPACE_LG, SPACE_LG)
+        root.setSpacing(SPACE_MD)
 
         def _card():
             w = QWidget()
             w.setObjectName("settings_card")
-            w.setStyleSheet(theme.inline_card_css("settings_card"))
+            w.setStyleSheet(theme.inline_card_css("settings_card", radius=RADIUS_MD))
             lay = QVBoxLayout(w)
-            lay.setContentsMargins(16, 16, 16, 16)
-            lay.setSpacing(12)
+            lay.setContentsMargins(SPACE_LG, SPACE_LG, SPACE_LG, SPACE_LG)
+            lay.setSpacing(SPACE_MD)
             return w, lay
 
         def _slbl(text):
@@ -61,6 +62,25 @@ class SettingsPage(QWidget):
         self.price_mode_combo.setFixedHeight(34)
         self.price_mode_combo.currentTextChanged.connect(self._on_price_mode_changed)
         gen_lay.addWidget(self.price_mode_combo)
+
+        gen_lay.addWidget(_divider())
+        window_lbl = QLabel("Flag cheapest in last … days")
+        window_lbl.setProperty("role", "dim")
+        gen_lay.addWidget(window_lbl)
+        window_row = QHBoxLayout()
+        window_row.setSpacing(SPACE_SM)
+        self.history_window_spin = QSpinBox()
+        self.history_window_spin.setMinimum(1)
+        self.history_window_spin.setMaximum(365)
+        self.history_window_spin.setValue(int(app_settings.get("price_history_window_days") or 30))
+        self.history_window_spin.setFixedHeight(34)
+        self.history_window_spin.setToolTip("Items at their lowest price in this window get a badge")
+        self.history_window_spin.valueChanged.connect(
+            lambda v: app_settings.set("price_history_window_days", v)
+        )
+        window_row.addWidget(self.history_window_spin)
+        window_row.addStretch()
+        gen_lay.addLayout(window_row)
 
         gen_lay.addWidget(_divider())
         gen_lay.addWidget(_slbl("Supermarket Browser"))
@@ -121,16 +141,68 @@ class SettingsPage(QWidget):
         gen_lay.addWidget(self.data_dir_status)
         root.addWidget(gen_card)
 
-        # ── Card 2: Theme Editor (extracted) ─────────────────── #
-        theme_card, theme_lay = _card()
-        self.theme_editor = ThemeEditor(self)
-        self.theme_editor.theme_changed.connect(self.theme_changed.emit)
-        theme_lay.addWidget(self.theme_editor)
-        root.addWidget(theme_card, 1)
+        # ── Card 2: Appearance ───────────────────────────────── #
+        app_card, app_lay = _card()
+        app_lay.addWidget(_slbl("Appearance"))
+
+        theme_lbl = QLabel("Active theme")
+        theme_lbl.setProperty("role", "dim")
+        app_lay.addWidget(theme_lbl)
+
+        theme_row = QHBoxLayout()
+        theme_row.setSpacing(SPACE_SM)
+        self.theme_combo = QComboBox()
+        self.theme_combo.setFixedHeight(34)
+        self._refresh_theme_combo()
+        self.theme_combo.currentTextChanged.connect(self._on_theme_changed)
+        theme_row.addWidget(self.theme_combo, 1)
+
+        edit_btn = QPushButton("Edit…")
+        edit_btn.setProperty("btn", "secondary")
+        edit_btn.setFixedHeight(34)
+        edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        edit_btn.clicked.connect(self._open_edit_theme)
+        theme_row.addWidget(edit_btn)
+
+        new_btn = QPushButton("New…")
+        new_btn.setProperty("btn", "secondary")
+        new_btn.setFixedHeight(34)
+        new_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        new_btn.clicked.connect(self._open_new_theme)
+        theme_row.addWidget(new_btn)
+
+        app_lay.addLayout(theme_row)
+        root.addWidget(app_card)
 
     # ── helpers ────────────────────────────────────────────────────── #
     def refresh_base_combo(self):
-        self.theme_editor.refresh_base_combo()
+        self._refresh_theme_combo()
+
+    def _refresh_theme_combo(self):
+        self.theme_combo.blockSignals(True)
+        self.theme_combo.clear()
+        self.theme_combo.addItems([n.capitalize() for n in theme.theme_names()])
+        self.theme_combo.setCurrentText(theme.theme().name.capitalize())
+        self.theme_combo.blockSignals(False)
+
+    def _on_theme_changed(self, name: str):
+        theme.set_theme(name.lower())
+        self.theme_changed.emit()
+
+    def _open_edit_theme(self):
+        current = theme.theme().name
+        dlg = ThemeEditorDialog(self, edit_name=current if not theme.is_builtin(current) else None)
+        dlg.theme_changed.connect(self._after_theme_dialog)
+        dlg.exec()
+
+    def _open_new_theme(self):
+        dlg = ThemeEditorDialog(self)
+        dlg.theme_changed.connect(self._after_theme_dialog)
+        dlg.exec()
+
+    def _after_theme_dialog(self):
+        self._refresh_theme_combo()
+        self.theme_changed.emit()
 
     def _on_price_mode_changed(self, text: str):
         mode = "per_weight" if text == "Per 100g" else "per_unit"
