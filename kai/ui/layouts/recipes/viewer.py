@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from kai.objects.recipe import Recipe
+from kai.core.backend import get_recipe
 from kai.ui.widgets.recipe_details import RecipeDetails, invalidate_recipe_card_cache
 from kai.ui.widgets.recipe_view import RecipeView
 from kai.ui import theme
@@ -162,7 +163,7 @@ class RecipesViewer(QWidget):
             if child.widget():
                 child.widget().deleteLater()
 
-        recipe_obj = Recipe()
+        recipe_obj = get_recipe()
         cards = []
         # iterate the dict once — avoids N redundant _get_id_by_name scans
         for _, doc in recipe_obj.io.all().items():

@@ -6,6 +6,7 @@ from kai.objects.item import Item
 from kai.objects.recipe import Recipe
 from kai.objects.price_history import PriceHistory
 from kai.objects.shopping_list import ShoppingList
+from kai.core.backend import get_item, get_recipe, get_shopping_list
 from kai.core import settings as app_settings
 from kai.ui import theme
 from kai.ui.tokens import (
@@ -376,7 +377,7 @@ class StatsPage(QWidget):
         root.setSpacing(SPACE_LG)
 
         # ── gather all data ── #
-        item_obj = Item()
+        item_obj = get_item()
         ph = PriceHistory()
         window = int(app_settings.get("price_history_window_days") or 30)
 
@@ -446,8 +447,8 @@ class StatsPage(QWidget):
         price_drops.sort(key=lambda x: x["delta"], reverse=True)
 
         # recipe costs
-        recipe_obj = Recipe()
-        sl = ShoppingList()
+        recipe_obj = get_recipe()
+        sl = get_shopping_list()
         recipe_costs = []
         for name, _ in recipe_obj.get_recipes():
             try:
@@ -525,7 +526,7 @@ class StatsPage(QWidget):
 
         if any(count > 0 for _, count in top_orders):
             order_cards = []
-            item_obj2 = Item()
+            item_obj2 = get_item()
             for rank, (name, count) in enumerate(top_orders, 1):
                 if count == 0:
                     break

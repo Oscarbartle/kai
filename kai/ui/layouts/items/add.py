@@ -2,6 +2,7 @@ from __future__ import annotations
 from urllib.parse import urlparse, parse_qs
 
 from kai.objects.item import Item
+from kai.core.backend import get_item
 from kai.ui import theme
 from kai.ui.widgets.tag_pill import TagChip
 
@@ -137,7 +138,7 @@ class ItemsAdd(QWidget):
         self.button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
 
     def _populate_edit_data(self):
-        doc = Item().get_item_details(self._edit_name)
+        doc = get_item().get_item_details(self._edit_name)
         if not doc:
             return
         self.item_name.setText(doc.get("name", ""))
@@ -159,7 +160,7 @@ class ItemsAdd(QWidget):
             if child.widget():
                 child.widget().deleteLater()
 
-        existing_tags = sorted(Item().get_item_tags())
+        existing_tags = sorted(get_item().get_item_tags())
         for tag in existing_tags:
             if tag and tag.strip():
                 chip = TagChip(tag.strip(), self._on_tag_chip_clicked)
@@ -218,7 +219,7 @@ class ItemsAdd(QWidget):
         default_weight_kg = round(self.default_weight_spin.value(), 2) if sold_by_weight else None
 
         if self._edit_name:
-            i = Item()
+            i = get_item()
             if name != self._edit_name:
                 i.update(self._edit_name, "name", name)
             i.update(name, "tags", tags)
@@ -226,11 +227,11 @@ class ItemsAdd(QWidget):
             i.update(name, "sold_by_weight", sold_by_weight)
             i.update(name, "default_weight_kg", default_weight_kg)
         else:
-            Item().create(name, stock_code, tags,
-                          sold_by_weight=sold_by_weight,
-                          default_weight_kg=default_weight_kg)
+            get_item().create(name, stock_code, tags,
+                              sold_by_weight=sold_by_weight,
+                              default_weight_kg=default_weight_kg)
             if self.long_term_cb.isChecked():
-                Item().update(name, "is_long_term", True)
+                get_item().update(name, "is_long_term", True)
 
         self.state.items_updated()
 

@@ -1,5 +1,6 @@
 from kai.objects.item import Item
 from kai.objects.recipe import Recipe
+from kai.core.backend import get_recipe, get_item, get_shopping_list
 from ..widgets.list_box import ListBox
 from kai.ui import theme
 
@@ -37,9 +38,9 @@ class Tags(QWidget):
 
     def _reload_tags(self):
         if self.source == "recipes":
-            tags = Recipe().get_recipe_tags()
+            tags = get_recipe().get_recipe_tags()
         else:
-            tags = Item().get_item_tags()
+            tags = get_item().get_item_tags()
 
         default = ["All"]
         if self.source == "recipes":

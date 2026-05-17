@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from kai.objects.recipe import Recipe
 from kai.objects.item import Item
-from kai.objects.shopping_list import ShoppingList
+from kai.core.backend import get_shopping_list
 from kai.objects.order_history import OrderHistory
 from kai.ui import theme
 from kai.ui.tokens import SPACE_SM, SPACE_MD, SPACE_LG, RADIUS_MD, FS_BODY, FS_META, FS_TINY
@@ -113,16 +113,19 @@ class RecipeStatsPanel(QWidget):
         root.setSpacing(SPACE_MD)
 
         # ── gather data ── #
-        doc = Recipe().get_recipe_details(self._name)
+        doc = get_recipe().get_recipe_details(self._name)
         ingredients = doc.get("ingredients", []) if doc else []
         servings = doc.get("servings", 1) if doc else 1
 
-        item_obj = Item()
-        sl = ShoppingList()
+        item_obj = get_item()
+        sl = get_shopping_list()
         entries = [{"recipe_name": self._name, "multiplier": 1}]
-        items = sl.compute_items(entries, exclude_long_term=True)
-        lt_items = sl.compute_long_term_items(entries)
-        nominal_items = sl.compute_nominal_items(entries)
+        try:
+            items = sl.compute_items(entries, exclude_long_term=True)
+            lt_items = sl.compute_long_term_items(entries)
+            nominal_items = sl.compute_nominal_items(entries)
+        except NotImplementedError:
+            items = lt_items = nominal_items = []
 
         total = sum(it["price"] for it in items if it.get("price"))
         lt_total = sum(it["price"] for it in lt_items if it.get("price"))

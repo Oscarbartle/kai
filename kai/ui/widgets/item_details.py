@@ -1,5 +1,6 @@
 from kai.objects.item import Item
 from kai.objects.price_history import PriceHistory
+from kai.core.backend import get_item
 from kai.utils.format_date import format_date
 from kai.ui import theme
 from kai.ui.refresh_worker import run_refresh
@@ -28,7 +29,7 @@ class ItemDetails(QWidget):
 
         self.state = state
         if doc is None:
-            doc = Item().get_item_details(item_name)
+            doc = get_item().get_item_details(item_name)
 
         if doc is None:
             print(f"Item {item_name} not found")
@@ -84,7 +85,7 @@ class ItemDetails(QWidget):
         self.is_out_of_stock = doc.get("out_of_stock", False)
 
         # price history flags — use the id we were handed when available
-        self._item_id = item_id if item_id is not None else Item()._get_id_by_name(self.name)
+        self._item_id = item_id if item_id is not None else get_item()._get_id_by_name(self.name)
         self._is_n_day_low = False
         self._is_all_time_low = False
         self._history_window = int(app_settings.get("price_history_window_days") or 30)
@@ -123,7 +124,7 @@ class ItemDetails(QWidget):
         self.add_layouts()
 
     def _get_id_by_name(self, name):
-        return Item()._get_id_by_name(name)
+        return get_item()._get_id_by_name(name)
 
     def set_stylesheet(self):
         t = theme.theme()
@@ -336,7 +337,7 @@ class ItemDetails(QWidget):
         super().mousePressEvent(event)
 
     def _on_long_term_toggled(self, checked):
-        Item().update(self.name, "is_long_term", bool(checked))
+        get_item().update(self.name, "is_long_term", bool(checked))
         if self.state:
             self.state.items_updated()
 
@@ -345,7 +346,7 @@ class ItemDetails(QWidget):
         run_refresh([self.name], on_done=callbacks, button=self.refresh_button)
 
     def _on_delete(self):
-        Item().delete(self.name)
+        get_item().delete(self.name)
         if self.state:
             self.state.items_updated()
 

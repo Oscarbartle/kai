@@ -117,15 +117,21 @@ class ShoppingListGenerate(BaseModel):
     lt_missing: list[str] = []
 
 
+class ShoppingListCreate(BaseModel):
+    """Create a new freeform shopping list."""
+    name: str
+
+
+class FreeformItemAdd(BaseModel):
+    item_name: str
+
+
 class ShoppingListResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     id: str
+    type: str = "generated"
     name: str
-    recipes: list[str]
-    recipe_entries: list[dict]
-    extra_items: list[dict]
-    lt_missing: list[str]
     items: list[dict]
     date_generated: str
     etag: str
@@ -133,6 +139,7 @@ class ShoppingListResponse(BaseModel):
 
 class ShoppingListSummary(BaseModel):
     id: str
+    type: str = "generated"
     name: str
     date_generated: str
     item_count: int

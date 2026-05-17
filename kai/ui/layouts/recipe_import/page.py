@@ -2,6 +2,7 @@ from kai.core.recipe_scraper import scrape_recipe
 from kai.utils.ingredient_matcher import match_ingredients
 from kai.objects.item import Item
 from kai.objects.recipe import Recipe
+from kai.core.backend import get_recipe, get_item, get_shopping_list
 from kai.ui.layouts.items.add import ItemsAdd
 from kai.ui.layouts.recipe_import.steps import attach_steps_to_stack
 from kai.ui import theme
@@ -158,7 +159,7 @@ class RecipeImport(QWidget):
         if not self._scraped:
             return
 
-        existing = Item().get_item_names()
+        existing = get_item().get_item_names()
         matches = match_ingredients(self._scraped["ingredients"], existing)
 
         for m in matches:
@@ -205,7 +206,7 @@ class RecipeImport(QWidget):
         layout.addWidget(items_add)
         dialog.exec()
 
-        new_existing = Item().get_item_names()
+        new_existing = get_item().get_item_names()
         new_names = set(new_existing) - old_names
         auto_select = new_names.pop() if len(new_names) == 1 else None
 
@@ -229,7 +230,7 @@ class RecipeImport(QWidget):
             if data:
                 ingredients.append(data)
 
-        Recipe().create(name, servings, tags, ingredients, instructions)
+        get_recipe().create(name, servings, tags, ingredients, instructions)
         self.state.recipes_updated()
 
         parent = self.parent()

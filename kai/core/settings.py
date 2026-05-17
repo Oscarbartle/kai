@@ -13,6 +13,8 @@ DEFAULTS = {
     "data_dir": "",                          # empty ⇒ use local data/
     "browser": "firefox",                    # browser for Woolworths cart: zen, firefox, chrome, edge, brave, chromium
     "price_history_window_days": 30,         # N-day low flag window
+    "backend": "local",                      # "local" or "remote"
+    "api_url": "https://kai.oserver.pro",    # base URL for remote backend
 }
 
 

@@ -174,6 +174,45 @@ class SettingsPage(QWidget):
         app_lay.addLayout(theme_row)
         root.addWidget(app_card)
 
+        # ── Card 3: Remote API ───────────────────────────────── #
+        api_card, api_lay = _card()
+        api_lay.addWidget(_slbl("Remote API"))
+
+        backend_lbl = QLabel("Data source")
+        backend_lbl.setProperty("role", "dim")
+        api_lay.addWidget(backend_lbl)
+        self.backend_combo = QComboBox()
+        self.backend_combo.addItems(["Local (offline)", "Remote (server)"])
+        self.backend_combo.setCurrentIndex(1 if app_settings.get("backend") == "remote" else 0)
+        self.backend_combo.setFixedHeight(34)
+        self.backend_combo.currentIndexChanged.connect(self._on_backend_changed)
+        api_lay.addWidget(self.backend_combo)
+
+        api_lay.addWidget(_divider())
+        url_lbl = QLabel("API URL")
+        url_lbl.setProperty("role", "dim")
+        api_lay.addWidget(url_lbl)
+        url_row = QHBoxLayout()
+        url_row.setSpacing(SPACE_SM)
+        self.api_url_input = QLineEdit()
+        self.api_url_input.setPlaceholderText("https://kai.oserver.pro")
+        self.api_url_input.setText(app_settings.get("api_url") or "")
+        self.api_url_input.setFixedHeight(34)
+        apply_url_btn = QPushButton("Apply")
+        apply_url_btn.setProperty("btn", "primary")
+        apply_url_btn.setFixedHeight(34)
+        apply_url_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        apply_url_btn.clicked.connect(self._apply_api_url)
+        url_row.addWidget(self.api_url_input, 1)
+        url_row.addWidget(apply_url_btn)
+        api_lay.addLayout(url_row)
+        self.api_url_status = QLabel("")
+        self.api_url_status.setProperty("role", "dim")
+        api_lay.addWidget(self.api_url_status)
+
+        root.addWidget(api_card)
+        root.addStretch()
+
     # ── helpers ────────────────────────────────────────────────────── #
     def refresh_base_combo(self):
         self._refresh_theme_combo()
@@ -234,3 +273,18 @@ class SettingsPage(QWidget):
             "Please restart Kai for the new data folder to take effect.",
         )
         self.data_dir_changed.emit()
+
+    # ── remote api ──────────────────────────────────────────────── #
+    def _on_backend_changed(self, index: int):
+        value = "remote" if index == 1 else "local"
+        app_settings.set("backend", value)
+        QMessageBox.information(
+            self, "Restart Required",
+            "Please restart Kai for the backend change to take effect.",
+        )
+
+    def _apply_api_url(self):
+        url = self.api_url_input.text().strip().rstrip("/")
+        app_settings.set("api_url", url or "https://kai.oserver.pro")
+        self.api_url_status.setStyleSheet(theme.label_css("success"))
+        self.api_url_status.setText("✓ URL saved — restart to apply")

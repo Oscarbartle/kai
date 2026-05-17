@@ -1,6 +1,6 @@
 from kai.objects.recipe import Recipe
 from kai.objects.item import Item
-from kai.objects.shopping_list import ShoppingList
+from kai.core.backend import get_shopping_list
 from kai.ui import theme
 from kai.ui.refresh_worker import run_refresh
 
@@ -21,7 +21,7 @@ class RecipeView(QWidget):
     def __init__(self, recipe_name):
         super().__init__()
 
-        doc = Recipe().get_recipe_details(recipe_name)
+        doc = get_recipe().get_recipe_details(recipe_name)
         if doc is None:
             return
 
@@ -115,7 +115,7 @@ class RecipeView(QWidget):
         ing_list.setContentsMargins(4, 4, 4, 4)
         ing_list.setSpacing(2)
 
-        item_obj = Item()
+        item_obj = get_item()
         for ing in self.ingredients:
             name = ing.get("item_name", "?")
             amount = ing.get("amount", 1) or 1
@@ -248,11 +248,14 @@ class RecipeView(QWidget):
         root.addWidget(self._body_stack, 1)
 
     def _calculate_cost(self):
-        sl = ShoppingList()
+        sl = get_shopping_list()
         entries = [{"recipe_name": self.name, "multiplier": 1}]
-        items = sl.compute_items(entries, True)
-        lt_items = sl.compute_long_term_items(entries)
-        nominal_items = sl.compute_nominal_items(entries)
+        try:
+            items = sl.compute_items(entries, True)
+            lt_items = sl.compute_long_term_items(entries)
+            nominal_items = sl.compute_nominal_items(entries)
+        except NotImplementedError:
+            items = lt_items = nominal_items = []
         total = sum(it["price"] for it in items if it.get("price"))
         lt_total = sum(it["price"] for it in lt_items if it.get("price"))
         nominal_total = sum(it["price"] for it in nominal_items if it.get("price"))

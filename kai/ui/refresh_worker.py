@@ -28,8 +28,8 @@ class _RefreshRunnable(QRunnable):
         self._delay = delay
 
     def run(self):
-        from kai.objects.item import Item
-        item_obj = Item()
+        from kai.core.backend import get_item
+        item_obj = get_item()
         total = len(self._item_names)
         for i, name in enumerate(self._item_names):
             try:

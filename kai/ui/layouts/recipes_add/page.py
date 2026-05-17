@@ -1,5 +1,6 @@
 from kai.objects.item import Item
 from kai.objects.recipe import Recipe
+from kai.core.backend import get_item, get_recipe
 from kai.ui import theme
 from kai.ui.layouts.recipes_add.panels import RecipeDetailsPanel, RecipeIngredientsPanel
 
@@ -67,7 +68,7 @@ class RecipesAdd(QWidget):
         self.button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
 
     def _populate_edit_data(self):
-        doc = Recipe().get_recipe_details(self._edit_name)
+        doc = get_recipe().get_recipe_details(self._edit_name)
         if not doc:
             return
         self.recipe_name.setText(doc.get("name", ""))
@@ -83,7 +84,7 @@ class RecipesAdd(QWidget):
             self._add_selected_display(name, amount, unit, nominal=nominal)
 
     def _refresh_item_list(self):
-        names = sorted(Item().get_item_names())
+        names = sorted(get_item().get_item_names())
         self.right_panel.set_available_items(names)
 
     def add_layouts(self):
@@ -245,14 +246,14 @@ class RecipesAdd(QWidget):
             return
 
         if self._edit_name:
-            r = Recipe()
+            r = get_recipe()
             r.update(self._edit_name, "name", name)
             r.update(name, "servings", servings)
             r.update(name, "tags", tags)
             r.update(name, "ingredients", self.ingredients_list)
             r.update(name, "instructions", instructions)
         else:
-            Recipe().create(name, servings, tags, self.ingredients_list, instructions)
+            get_recipe().create(name, servings, tags, self.ingredients_list, instructions)
 
         self.state.recipes_updated()
 
