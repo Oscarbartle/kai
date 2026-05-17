@@ -1,6 +1,7 @@
 from kai.objects.recipe import Recipe
 from kai.objects.item import Item
 from kai.objects.shopping_list import ShoppingList
+from kai.core.backend import get_recipe, get_item, get_shopping_list
 from kai.ui import theme
 from kai.ui.layouts.shopping_list.cards import RecipePickerCard, SavedListCard
 from kai.ui.tokens import SPACE_SM, SPACE_MD, RADIUS_SM, H_ROW, FS_BODY, FS_META
@@ -247,7 +248,7 @@ class ShoppingListPickerMixin:
                 child.widget().deleteLater()
 
         self._recipe_cards = []
-        recipes = Recipe().get_recipes()
+        recipes = get_recipe().get_recipes()
         recipes.sort(key=lambda x: x[0])
 
         if not recipes:
@@ -272,7 +273,7 @@ class ShoppingListPickerMixin:
                 child.widget().deleteLater()
 
         t = theme.theme()
-        tags = sorted(Recipe().get_recipe_tags())
+        tags = sorted(get_recipe().get_recipe_tags())
 
         if not tags:
             self.tag_scroll.setVisible(False)
@@ -338,7 +339,7 @@ class ShoppingListPickerMixin:
         for card in self._recipe_cards:
             name_match = not search or search in card._name.lower()
             if self._active_tag == "★ Favourites":
-                doc = Recipe().get_recipe_details(card._name)
+                doc = get_recipe().get_recipe_details(card._name)
                 tag_match = doc.get("is_favourite", False) if doc else False
             else:
                 tag_match = not self._active_tag or self._active_tag in card.tags
@@ -357,7 +358,7 @@ class ShoppingListPickerMixin:
 
         self._item_rows = []
         t = theme.theme()
-        item_obj = Item()
+        item_obj = get_item()
         names = sorted(item_obj.get_item_names())
 
         for name in names:
@@ -433,7 +434,7 @@ class ShoppingListPickerMixin:
                 child.widget().deleteLater()
 
         t = theme.theme()
-        tags = sorted(Item().get_item_tags())
+        tags = sorted(get_item().get_item_tags())
 
         if not tags:
             self.item_tag_scroll.setVisible(False)
@@ -495,14 +496,14 @@ class ShoppingListPickerMixin:
             if child.widget():
                 child.widget().deleteLater()
 
-        saved = ShoppingList().get_all_lists()
+        saved = get_shopping_list().get_all_lists()
 
         if not saved:
             empty = QLabel("No saved lists yet")
             empty.setProperty("role", "faint")
             self.saved_scroll_layout.addWidget(empty)
         else:
-            for name, lid, date in saved:
+            for name, lid, date, *_ in saved:
                 card = SavedListCard(name, lid, date, self._load_saved, self._delete_saved)
                 self.saved_scroll_layout.addWidget(card)
 
@@ -510,7 +511,7 @@ class ShoppingListPickerMixin:
 
     def _load_saved(self, list_id):
         self.current_list_id = list_id
-        list_data = ShoppingList().get_list(list_id)
+        list_data = get_shopping_list().get_list(list_id)
         if not list_data:
             return
 
@@ -527,5 +528,5 @@ class ShoppingListPickerMixin:
         self._show_recipes()
 
     def _delete_saved(self, list_id):
-        ShoppingList().delete_list(list_id)
+        get_shopping_list().delete_list(list_id)
         self._refresh_saved_list()

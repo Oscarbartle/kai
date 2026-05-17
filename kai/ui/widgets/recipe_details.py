@@ -1,6 +1,6 @@
 from kai.objects.recipe import Recipe
 from kai.objects.item import Item
-from kai.objects.shopping_list import ShoppingList
+from kai.core.backend import get_shopping_list
 from kai.utils.format_date import format_date
 from kai.ui import theme
 from kai.ui.refresh_worker import run_refresh
@@ -38,7 +38,7 @@ class RecipeDetails(QWidget):
 
         self.state = state
         if doc is None:
-            doc = Recipe().get_recipe_details(recipe_name)
+            doc = get_recipe().get_recipe_details(recipe_name)
 
         if doc is None:
             print(f"Recipe {recipe_name} not found")
@@ -70,11 +70,14 @@ class RecipeDetails(QWidget):
     def _calculate_cost(self):
         if self.name in _cost_cache:
             return _cost_cache[self.name]
-        sl = ShoppingList()
+        sl = get_shopping_list()
         entries = [{"recipe_name": self.name, "multiplier": 1}]
-        items = sl.compute_items(entries, True)
-        lt_items = sl.compute_long_term_items(entries)
-        nominal_items = sl.compute_nominal_items(entries)
+        try:
+            items = sl.compute_items(entries, True)
+            lt_items = sl.compute_long_term_items(entries)
+            nominal_items = sl.compute_nominal_items(entries)
+        except NotImplementedError:
+            items = lt_items = nominal_items = []
         total = sum(it["price"] for it in items if it.get("price"))
         lt_total = sum(it["price"] for it in lt_items if it.get("price"))
         nominal_total = sum(it["price"] for it in nominal_items if it.get("price"))
@@ -87,7 +90,7 @@ class RecipeDetails(QWidget):
         if self.name in _analysis_cache:
             return _analysis_cache[self.name]
 
-        item_obj = Item()
+        item_obj = get_item()
         savings_regular = 0.0
         savings_lt = 0.0
         specials_count = 0
@@ -282,7 +285,7 @@ class RecipeDetails(QWidget):
 
     def _on_fav_toggled(self):
         self.is_favourite = not self.is_favourite
-        Recipe().update(self.name, "is_favourite", self.is_favourite)
+        get_recipe().update(self.name, "is_favourite", self.is_favourite)
         if self.state:
             self.state.recipes_updated()
 
@@ -303,7 +306,7 @@ class RecipeDetails(QWidget):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        Recipe().delete(self.name)
+        get_recipe().delete(self.name)
         if self.state:
             self.state.recipes_updated()
 

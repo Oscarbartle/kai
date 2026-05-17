@@ -1,6 +1,7 @@
 from kai.objects.item import Item
 from kai.objects.recipe import Recipe
 from kai.objects.shopping_list import ShoppingList
+from kai.core.backend import get_recipe, get_shopping_list
 from kai.ui import theme
 from kai.utils.format_date import format_date
 from kai.ui.tokens import (
@@ -30,7 +31,7 @@ class RecipePickerCard(QWidget):
         self._name = recipe_name
         self._on_add = on_add
 
-        doc = Recipe().get_recipe_details(recipe_name)
+        doc = get_recipe().get_recipe_details(recipe_name)
         if not doc:
             return
 
@@ -132,7 +133,7 @@ class RecipePickerCard(QWidget):
         layout.addLayout(right_col, 0, 2, 2, 1)
 
     def _calc_cost(self):
-        sl = ShoppingList()
+        sl = get_shopping_list()
         entries = [{"recipe_name": self._name, "multiplier": 1}]
         items = sl.compute_items(entries, True)
         lt_items = sl.compute_long_term_items(entries)
@@ -224,7 +225,7 @@ class CartEntry(QWidget):
 
         label = QLabel(recipe_name)
         label.setStyleSheet(f"color: {t.text}; font-size: {FS_BODY}px;")
-        doc = Recipe().get_recipe_details(recipe_name)
+        doc = get_recipe().get_recipe_details(recipe_name)
         base_servings = doc.get("servings", 1) if doc else 1
         total_servings = base_servings * multiplier
         label.setToolTip(f"Serves {total_servings}")

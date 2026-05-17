@@ -2,6 +2,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from kai.objects.item import Item
+from kai.core.backend import get_item
 from kai.ui.widgets.item_details import ItemDetails
 from kai.ui.widgets.item_view import ItemView
 from kai.ui import theme
@@ -168,7 +169,7 @@ class ItemsViewer(QWidget):
     def _on_refresh_all(self):
         cutoff = datetime.now() - _STALE_AFTER
         stale = []
-        for doc in Item().io.all().values():
+        for doc in get_item().io.all().values():
             try:
                 updated = datetime.fromisoformat(doc.get("date_updated") or "")
                 if updated < cutoff:
@@ -194,7 +195,7 @@ class ItemsViewer(QWidget):
             if child.widget():
                 child.widget().deleteLater()
 
-        item_obj = Item()
+        item_obj = get_item()
         cards = []
         for item_id, doc in item_obj.io.all().items():
             name = doc.get("name")

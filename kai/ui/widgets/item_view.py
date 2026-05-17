@@ -3,6 +3,7 @@ from __future__ import annotations
 from kai.objects.item import Item
 from kai.objects.price_history import PriceHistory
 from kai.objects.order_history import OrderHistory
+from kai.core.backend import get_recipe, get_item, get_shopping_list
 from kai.ui import theme
 from kai.ui.refresh_worker import run_refresh
 from kai.ui.widgets.charts import make_price_chart
@@ -67,7 +68,7 @@ class ItemView(QWidget):
     def __init__(self, item_name: str):
         super().__init__()
 
-        item_obj = Item()
+        item_obj = get_item()
         self.doc = item_obj.get_item_details(item_name)
         if self.doc is None:
             return

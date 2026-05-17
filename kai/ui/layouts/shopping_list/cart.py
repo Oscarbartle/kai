@@ -4,6 +4,7 @@ import webbrowser
 from kai.objects.recipe import Recipe
 from kai.objects.item import Item
 from kai.objects.shopping_list import ShoppingList
+from kai.core.backend import get_recipe, get_item, get_shopping_list
 from kai.ui import theme
 from kai.ui.refresh_worker import run_refresh
 from kai.ui.layouts.shopping_list.cards import CartEntry, ExtraItemEntry
@@ -219,7 +220,7 @@ class ShoppingListCartMixin:
     # ── cart management ────────────────────────────────────────── #
 
     def _add_extra_item(self, item_name, units=1, weight_kg=None):
-        item_obj = Item()
+        item_obj = get_item()
         if item_name in item_obj.get_long_term_items():
             self.lt_have[item_name] = False
 
@@ -239,7 +240,7 @@ class ShoppingListCartMixin:
         self._refresh_cart()
 
     def _refresh_recipe_metadata(self, recipe_name):
-        doc = Recipe().get_recipe_details(recipe_name)
+        doc = get_recipe().get_recipe_details(recipe_name)
         if not doc:
             return
         names = [ing.get("item_name") for ing in doc.get("ingredients", []) if ing.get("item_name")]
@@ -375,7 +376,7 @@ class ShoppingListCartMixin:
             self._render_lt_section()
             return
 
-        recipe_obj = Recipe()
+        recipe_obj = get_recipe()
         total_servings = 0
         for entry in self.recipe_entries:
             doc = recipe_obj.get_recipe_details(entry["recipe_name"])
@@ -383,9 +384,14 @@ class ShoppingListCartMixin:
             total_servings += base * entry.get("multiplier", 1)
         self.serves_label.setText(f"Serves {total_servings}  ·" if total_servings > 0 else "")
 
-        sl = ShoppingList()
-        self.preview_items = sl.compute_items(self.recipe_entries, True, self.extra_items)
-        self.lt_items = sl.compute_long_term_items(self.recipe_entries, self.extra_items)
+        sl = get_shopping_list()
+        try:
+            self.preview_items = sl.compute_items(self.recipe_entries, True, self.extra_items)
+            self.lt_items = sl.compute_long_term_items(self.recipe_entries, self.extra_items)
+        except NotImplementedError:
+            # Remote mode: item computation happens server-side on generate.
+            self.preview_items = []
+            self.lt_items = []
 
         lt_names = {item["item_name"] for item in self.lt_items}
         self.lt_have = {k: v for k, v in self.lt_have.items() if k in lt_names}
@@ -536,7 +542,7 @@ class ShoppingListCartMixin:
 
         name = self.name_input.text().strip()
         lt_missing = [n for n, have in self.lt_have.items() if not have]
-        self.current_list_id = ShoppingList().generate(
+        self.current_list_id = get_shopping_list().generate(
             self.recipe_entries,
             True,
             name,
@@ -613,7 +619,7 @@ class ShoppingListCartMixin:
         from kai.ui.widgets.cart_confirm_dialog import CartConfirmDialog, CartProgressDialog
         from kai.ui.widgets.lt_cart_wizard import LtCartWizard
 
-        item_obj = Item()
+        item_obj = get_item()
 
         # ── Step 1: long-term items wizard ───────────────────────── #
         extra_lt_items = []
