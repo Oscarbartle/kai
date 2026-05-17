@@ -5,7 +5,7 @@ from kai.ui.tokens import SPACE_SM, SPACE_LG, SPACE_MD, RADIUS_MD
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QComboBox, QSpinBox,
+    QLineEdit, QComboBox, QSpinBox, QScrollArea,
     QMessageBox, QFileDialog, QFrame,
 )
 from PySide6.QtCore import Qt, Signal
@@ -22,7 +22,21 @@ class SettingsPage(QWidget):
 
     def _build(self):
         t = theme.theme()
-        root = QVBoxLayout(self)
+
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setStyleSheet("background: transparent; border: none;")
+
+        container = QWidget()
+        container.setStyleSheet("background: transparent;")
+        scroll.setWidget(container)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
+
+        root = QVBoxLayout(container)
         root.setContentsMargins(SPACE_LG, SPACE_LG, SPACE_LG, SPACE_LG)
         root.setSpacing(SPACE_MD)
 
