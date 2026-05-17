@@ -182,8 +182,6 @@ def add_item_to_freeform(
     data = obj.get_list(list_id)
     if data is None:
         raise HTTPException(status_code=404, detail="Shopping list not found.")
-    if data.get("type") != "freeform":
-        raise HTTPException(status_code=400, detail="Items can only be added to freeform lists.")
     check_etag(data, if_match)
     obj.freeform_add_item(list_id, body.item_name)
     updated = obj.get_list(list_id)
@@ -203,8 +201,6 @@ def remove_item_from_freeform(
     data = obj.get_list(list_id)
     if data is None:
         raise HTTPException(status_code=404, detail="Shopping list not found.")
-    if data.get("type") != "freeform":
-        raise HTTPException(status_code=400, detail="Items can only be removed from freeform lists.")
     check_etag(data, if_match)
     ok = obj.freeform_remove_item(list_id, item_name)
     if not ok:

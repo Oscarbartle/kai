@@ -1,6 +1,6 @@
 from kai.objects.recipe import Recipe
 from kai.objects.item import Item
-from kai.core.backend import get_shopping_list
+from kai.core.backend import get_recipe, get_item, get_shopping_list
 from kai.utils.format_date import format_date
 from kai.ui import theme
 from kai.ui.refresh_worker import run_refresh

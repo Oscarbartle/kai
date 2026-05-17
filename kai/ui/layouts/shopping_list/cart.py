@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QFrame,
 )
 from PySide6.QtGui import QCursor
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 
 
 class ShoppingListCartMixin:
@@ -129,6 +129,12 @@ class ShoppingListCartMixin:
         new_list_btn.clicked.connect(self._on_clear_list)
         banner_layout.addWidget(new_list_btn)
         right_layout.addWidget(self._edit_banner)
+
+        # ── auto-save timer (3 s debounce after cart changes) ──── #
+        self._autosave_timer = QTimer()
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.setInterval(3000)
+        self._autosave_timer.timeout.connect(self._on_save)
 
         # ── vertical splitter: Cart / Shopping List / Long-term ── #
         self.v_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -358,6 +364,7 @@ class ShoppingListCartMixin:
             self.cart_layout.addStretch()
             self.save_button.setEnabled(True)
             self.clear_button.setEnabled(True)
+            self._autosave_timer.start()  # restart debounce on every change
 
         self._auto_render()
         self._save_draft()
@@ -592,14 +599,25 @@ class ShoppingListCartMixin:
 
         if self.current_list_id:
             # Update the existing list in place so the phone sees the same ID
-            sl.regenerate(
-                self.current_list_id,
-                self.recipe_entries,
-                True,
-                name,
-                self.extra_items,
-                lt_missing,
-            )
+            try:
+                sl.regenerate(
+                    self.current_list_id,
+                    self.recipe_entries,
+                    True,
+                    name,
+                    self.extra_items,
+                    lt_missing,
+                )
+            except Exception:
+                # Server not yet updated — fall back to creating a new list
+                self.current_list_id = sl.generate(
+                    self.recipe_entries,
+                    True,
+                    name,
+                    self.extra_items,
+                    lt_missing=lt_missing,
+                )
+                self.name_input.clear()
         else:
             self.current_list_id = sl.generate(
                 self.recipe_entries,
@@ -614,6 +632,7 @@ class ShoppingListCartMixin:
         self._clear_draft()
 
     def _on_clear_list(self):
+        self._autosave_timer.stop()
         self.recipe_entries = []
         self.extra_items = []
         self.preview_items = []

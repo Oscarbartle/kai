@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from kai.objects.recipe import Recipe
 from kai.objects.item import Item
-from kai.core.backend import get_shopping_list
+from kai.core.backend import get_recipe, get_item, get_shopping_list
 from kai.objects.order_history import OrderHistory
 from kai.ui import theme
 from kai.ui.tokens import SPACE_SM, SPACE_MD, SPACE_LG, RADIUS_MD, FS_BODY, FS_META, FS_TINY
