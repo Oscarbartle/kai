@@ -374,25 +374,28 @@ class ShoppingList:
                 return True
         return False
 
-    def freeform_link_item(self, list_id: str, item_name: str) -> bool:
+    def freeform_link_item(self, list_id: str, item_name: str, target_name: str | None = None) -> bool:
         """Re-resolve an unrecognised item against the current pantry.
 
-        Call this after a free-text item has been added to the pantry.
-        Returns True if the item was found and updated.
+        If target_name is given, link to that pantry item and rename the list entry.
+        Returns True if the pantry item was found and the list entry updated.
         """
         data = self.io.all()
         if list_id not in data:
             return False
         item_obj = Item()
-        details = item_obj.get_item_details(item_name)
+        lookup = target_name or item_name
+        details = item_obj.get_item_details(lookup)
         if not details:
             return False
-        price = item_obj.get_item_price(item_name, mode="per_unit")
+        price = item_obj.get_item_price(lookup, mode="per_unit")
         for item in data[list_id].get("items", []):
             if item["item_name"] == item_name:
                 item["recognised"] = True
                 item["tags"] = details.get("tags", [])
                 item["unit_price"] = float(price) if price else None
+                if target_name and target_name != item_name:
+                    item["item_name"] = target_name
                 self.io.write(data)
                 return True
         return False
@@ -400,13 +403,14 @@ class ShoppingList:
     def get_list(self, list_id: str) -> dict | None:
         return self.io.get(list_id)
 
-    def get_all_lists(self) -> list[tuple[str, str, str]]:
-        """Return ``(name, list_id, date)`` tuples sorted newest first."""
+    def get_all_lists(self) -> list[tuple[str, str, str, str]]:
+        """Return ``(name, list_id, date, type)`` tuples sorted newest first."""
         result = [
             (
                 data.get("name", ", ".join(data.get("recipes", []))),
                 lid,
                 data.get("date_generated", ""),
+                data.get("type", "generated"),
             )
             for lid, data in self.io.all().items()
         ]

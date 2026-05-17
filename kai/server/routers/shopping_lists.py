@@ -26,9 +26,10 @@ def list_shopping_lists():
             id=lid,
             name=name,
             date_generated=date,
+            type=list_type,
             item_count=len(obj.io.get(lid).get("items", [])),
         )
-        for name, lid, date in obj.get_all_lists()
+        for name, lid, date, list_type in obj.get_all_lists()
     ]
 
 
@@ -169,17 +170,21 @@ def link_item(
     list_id: str,
     item_name: str,
     response: Response,
+    target_name: str | None = None,
     if_match: Annotated[str | None, Header()] = None,
 ):
-    """Re-resolve an unrecognised item against the pantry (call after adding it to items)."""
+    """Re-resolve an unrecognised item against the pantry.
+
+    Pass target_name to link to a different pantry item name (and rename the list entry).
+    """
     obj = ShoppingList()
     data = obj.get_list(list_id)
     if data is None:
         raise HTTPException(status_code=404, detail="Shopping list not found.")
     check_etag(data, if_match)
-    ok = obj.freeform_link_item(list_id, item_name)
+    ok = obj.freeform_link_item(list_id, item_name, target_name=target_name)
     if not ok:
-        raise HTTPException(status_code=404, detail=f"Item '{item_name}' not found in pantry.")
+        raise HTTPException(status_code=404, detail=f"Item '{target_name or item_name}' not found in pantry.")
     updated = obj.get_list(list_id)
     response.headers["ETag"] = f'"{record_etag(updated)}"'
     return _list_response(list_id, updated)
