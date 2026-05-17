@@ -76,6 +76,31 @@ class ShoppingListCartMixin:
         self.links_button.setToolTip("Add items to Woolworths trolley")
         top_row.addWidget(self.links_button)
 
+        from kai.ui.widgets.nav_button import _colorize_svg
+        from PySide6.QtCore import QSize
+        from pathlib import Path
+        _icons = Path(__file__).resolve().parent.parent.parent.parent / "icons"
+        _BTN = 34
+        self.refresh_button = QPushButton()
+        self.refresh_button.setFixedSize(_BTN, _BTN)
+        self.refresh_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.refresh_button.setToolTip("Refresh from server")
+        self.refresh_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {t.surface};
+                border: 1px solid {t.border};
+                border-radius: {_BTN // 2}px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{ background-color: {t.border}; }}
+            QPushButton:pressed {{ background-color: {t.surface}; }}
+        """)
+        _refresh_icon = _colorize_svg(str(_icons / "refresh.svg"), t.text_dim, size=16)
+        if _refresh_icon:
+            self.refresh_button.setIcon(_refresh_icon)
+            self.refresh_button.setIconSize(QSize(16, 16))
+        top_row.addWidget(self.refresh_button)
+
         self.clear_button = QPushButton("Clear")
         self.clear_button.setProperty("btn", "secondary")
         self.clear_button.setEnabled(False)
@@ -83,6 +108,27 @@ class ShoppingListCartMixin:
         top_row.addWidget(self.clear_button)
 
         right_layout.addLayout(top_row)
+
+        # ── edit-mode banner ──────────────────────────────────── #
+        self._edit_banner = QWidget()
+        self._edit_banner.setObjectName("edit_banner")
+        self._edit_banner.setVisible(False)
+        banner_layout = QHBoxLayout(self._edit_banner)
+        banner_layout.setContentsMargins(SPACE_MD, SPACE_XS, SPACE_SM, SPACE_XS)
+        banner_layout.setSpacing(SPACE_SM)
+        self._edit_banner_label = QLabel()
+        self._edit_banner_label.setStyleSheet(
+            f"color: {t.accent}; font-size: {FS_META}px; font-weight: {FW_MEDIUM};"
+        )
+        banner_layout.addWidget(self._edit_banner_label, 1)
+        new_list_btn = QPushButton("New list")
+        new_list_btn.setProperty("btn", "secondary")
+        new_list_btn.setFixedHeight(H_ROW - 4)
+        new_list_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        new_list_btn.setToolTip("Discard loaded list and start fresh")
+        new_list_btn.clicked.connect(self._on_clear_list)
+        banner_layout.addWidget(new_list_btn)
+        right_layout.addWidget(self._edit_banner)
 
         # ── vertical splitter: Cart / Shopping List / Long-term ── #
         self.v_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -542,14 +588,28 @@ class ShoppingListCartMixin:
 
         name = self.name_input.text().strip()
         lt_missing = [n for n, have in self.lt_have.items() if not have]
-        self.current_list_id = get_shopping_list().generate(
-            self.recipe_entries,
-            True,
-            name,
-            self.extra_items,
-            lt_missing=lt_missing,
-        )
-        self.name_input.clear()
+        sl = get_shopping_list()
+
+        if self.current_list_id:
+            # Update the existing list in place so the phone sees the same ID
+            sl.regenerate(
+                self.current_list_id,
+                self.recipe_entries,
+                True,
+                name,
+                self.extra_items,
+                lt_missing,
+            )
+        else:
+            self.current_list_id = sl.generate(
+                self.recipe_entries,
+                True,
+                name,
+                self.extra_items,
+                lt_missing=lt_missing,
+            )
+            self.name_input.clear()
+
         self.state.new_shopping_list.emit()
         self._clear_draft()
 
@@ -561,6 +621,7 @@ class ShoppingListCartMixin:
         self.lt_have = {}
         self.current_list_id = None
         self.name_input.clear()
+        self._edit_banner.setVisible(False)
         self._refresh_cart()
         self._clear_draft()
 
@@ -569,6 +630,34 @@ class ShoppingListCartMixin:
             if item["item_name"] == item_name:
                 item["purchased"] = purchased
                 break
+        if self.current_list_id:
+            import threading
+            lid = self.current_list_id
+            threading.Thread(
+                target=get_shopping_list().mark_purchased,
+                args=(lid, item_name, purchased),
+                daemon=True,
+            ).start()
+
+    def _on_refresh(self):
+        """Reload the currently loaded list (if any) and refresh the saved list panel."""
+        self._refresh_saved_list()
+        if not self.current_list_id:
+            return
+        list_data = get_shopping_list().get_list(self.current_list_id)
+        if not list_data:
+            return
+        self.recipe_entries = list_data.get("recipe_entries", [])
+        self.extra_items = list_data.get("extra_items", [])
+        self.name_input.setText(list_data.get("name", ""))
+        lt_missing = list_data.get("lt_missing", [])
+        self.lt_have = {n: False for n in lt_missing}
+        # Reflect server-side purchased state back into preview_items
+        server_purchased = {it["item_name"]: it.get("purchased", False) for it in list_data.get("items", [])}
+        for item in self.preview_items:
+            if item["item_name"] in server_purchased:
+                item["purchased"] = server_purchased[item["item_name"]]
+        self._refresh_cart()
 
     # ── export ─────────────────────────────────────────────────── #
 

@@ -5,8 +5,10 @@ from kai.clients.http import get_session, base_url
 
 
 class RecipeClient:
+    _shared_cache: dict | None = None       # class-level: shared across all instances
+    _scaled_cache: dict = {}                # (rid, multiplier) → scaled ingredients
+
     def __init__(self):
-        self._cache: dict | None = None
         self.io = self._IoProxy(self)
 
     # ── cache ─────────────────────────────────────────────────────── #
@@ -24,12 +26,13 @@ class RecipeClient:
         return result
 
     def _get_cache(self) -> dict:
-        if self._cache is None:
-            self._cache = self._fetch_all()
-        return self._cache
+        if RecipeClient._shared_cache is None:
+            RecipeClient._shared_cache = self._fetch_all()
+        return RecipeClient._shared_cache
 
     def _invalidate(self):
-        self._cache = None
+        RecipeClient._shared_cache = None
+        RecipeClient._scaled_cache = {}
 
     # ── _IoProxy ─────────────────────────────────────────────────── #
 
@@ -90,10 +93,13 @@ class RecipeClient:
         rid = self._get_id_by_name(name)
         if rid is None:
             return []
-        s = get_session()
-        r = s.get(f"{base_url()}/recipes/{rid}/scaled", params={"multiplier": multiplier})
-        r.raise_for_status()
-        return r.json()
+        key = (rid, multiplier)
+        if key not in RecipeClient._scaled_cache:
+            s = get_session()
+            r = s.get(f"{base_url()}/recipes/{rid}/scaled", params={"multiplier": multiplier})
+            r.raise_for_status()
+            RecipeClient._scaled_cache[key] = r.json()
+        return RecipeClient._scaled_cache[key]
 
     # ── mutation API ──────────────────────────────────────────────── #
 

@@ -82,6 +82,55 @@ def delete_shopping_list(
     obj.delete_list(list_id)
 
 
+@router.post("/{list_id}/regenerate", response_model=ShoppingListResponse)
+def regenerate_shopping_list(
+    list_id: str,
+    body: ShoppingListGenerate,
+    response: Response,
+    if_match: Annotated[str | None, Header()] = None,
+):
+    """Regenerate an existing list in place, preserving its ID and purchased state."""
+    obj = ShoppingList()
+    data = obj.get_list(list_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Shopping list not found.")
+    check_etag(data, if_match)
+
+    # Preserve purchased state from current items
+    prev_purchased = {it["item_name"]: it.get("purchased", False) for it in data.get("items", [])}
+
+    recipe_entries = [e.model_dump() for e in body.recipe_entries]
+    extra_items = [e.model_dump() for e in body.extra_items]
+
+    items = obj.compute_items(recipe_entries, body.exclude_long_term, extra_items)
+    if body.lt_missing:
+        lt_items = obj.compute_long_term_items(recipe_entries, extra_items)
+        items.extend(lt for lt in lt_items if lt["item_name"] in body.lt_missing)
+
+    for item in items:
+        if item["item_name"] in prev_purchased:
+            item["purchased"] = prev_purchased[item["item_name"]]
+
+    from datetime import datetime
+    recipe_names = [
+        e["recipe_name"] + (f" x{e['multiplier']}" if e.get("multiplier", 1) > 1 else "")
+        for e in recipe_entries
+    ]
+    obj.io.update(list_id, {
+        "type": "generated",
+        "name": body.name or ", ".join(recipe_names),
+        "recipes": recipe_names,
+        "recipe_entries": recipe_entries,
+        "extra_items": extra_items,
+        "lt_missing": body.lt_missing or [],
+        "items": items,
+        "date_generated": datetime.now().isoformat(),
+    })
+    updated = obj.get_list(list_id)
+    response.headers["ETag"] = f'"{record_etag(updated)}"'
+    return _list_response(list_id, updated)
+
+
 @router.patch("/{list_id}/items/{item_name}/purchased", response_model=ShoppingListResponse)
 def toggle_purchased(
     list_id: str,

@@ -135,8 +135,11 @@ class RecipePickerCard(QWidget):
     def _calc_cost(self):
         sl = get_shopping_list()
         entries = [{"recipe_name": self._name, "multiplier": 1}]
-        items = sl.compute_items(entries, True)
-        lt_items = sl.compute_long_term_items(entries)
+        try:
+            items = sl.compute_items(entries, True)
+            lt_items = sl.compute_long_term_items(entries)
+        except NotImplementedError:
+            return 0.0, 0.0
         total = sum(it["price"] for it in items if it.get("price"))
         lt_total = sum(it["price"] for it in lt_items if it.get("price"))
         return round(total, 2), round(total + lt_total, 2)

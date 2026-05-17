@@ -5,8 +5,9 @@ from kai.clients.http import get_session, base_url
 
 
 class ItemClient:
+    _shared_cache: dict | None = None  # class-level: shared across all instances
+
     def __init__(self):
-        self._cache: dict | None = None
         self.io = self._IoProxy(self)
 
     # ── cache ─────────────────────────────────────────────────────── #
@@ -24,12 +25,12 @@ class ItemClient:
         return result
 
     def _get_cache(self) -> dict:
-        if self._cache is None:
-            self._cache = self._fetch_all()
-        return self._cache
+        if ItemClient._shared_cache is None:
+            ItemClient._shared_cache = self._fetch_all()
+        return ItemClient._shared_cache
 
     def _invalidate(self):
-        self._cache = None
+        ItemClient._shared_cache = None
 
     # ── _IoProxy ─────────────────────────────────────────────────── #
 
