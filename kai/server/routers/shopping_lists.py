@@ -6,6 +6,7 @@ from kai.server.schemas import (
     ShoppingListGenerate,
     ShoppingListCreate,
     FreeformItemAdd,
+    FreeformRecipeAdd,
     ShoppingListResponse,
     ShoppingListSummary,
 )
@@ -184,6 +185,27 @@ def add_item_to_freeform(
         raise HTTPException(status_code=404, detail="Shopping list not found.")
     check_etag(data, if_match)
     obj.freeform_add_item(list_id, body.item_name)
+    updated = obj.get_list(list_id)
+    response.headers["ETag"] = f'"{record_etag(updated)}"'
+    return _list_response(list_id, updated)
+
+
+@router.post("/{list_id}/recipe-entries", response_model=ShoppingListResponse, status_code=201)
+def add_recipe_to_freeform(
+    list_id: str,
+    body: FreeformRecipeAdd,
+    response: Response,
+    if_match: Annotated[str | None, Header()] = None,
+):
+    """Add a recipe's ingredients to a freeform list, grouped as a recipe entry."""
+    obj = ShoppingList()
+    data = obj.get_list(list_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Shopping list not found.")
+    check_etag(data, if_match)
+    ok = obj.freeform_add_recipe(list_id, body.recipe_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Recipe not found.")
     updated = obj.get_list(list_id)
     response.headers["ETag"] = f'"{record_etag(updated)}"'
     return _list_response(list_id, updated)

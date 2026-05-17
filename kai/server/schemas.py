@@ -126,6 +126,10 @@ class FreeformItemAdd(BaseModel):
     item_name: str
 
 
+class FreeformRecipeAdd(BaseModel):
+    recipe_id: str
+
+
 class ShoppingListResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 

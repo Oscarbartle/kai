@@ -417,6 +417,87 @@ class ShoppingList:
             self.io.write(data)
         return True
 
+    def freeform_add_recipe(self, list_id: str, recipe_id: str) -> bool:
+        """Add a recipe's ingredients to a freeform list as a grouped recipe entry.
+
+        Each ingredient is stored as a regular item with source_recipe_name set.
+        The list also tracks the recipe entry in freeform_recipe_entries.
+        Returns False if list or recipe not found.
+        """
+        data = self.io.all()
+        if list_id not in data:
+            return False
+
+        recipe_obj = Recipe()
+        recipe_data = recipe_obj.get_recipe_by_id(recipe_id)
+        if not recipe_data:
+            return False
+
+        recipe_name = recipe_data.get("name", "")
+        multiplier = 1
+        scaled = recipe_obj.get_scaled_ingredients(recipe_name, multiplier)
+
+        item_obj = Item()
+        item_names_added: list[str] = []
+
+        existing_names = {it["item_name"].lower() for it in data[list_id]["items"]}
+
+        for ing in scaled:
+            item_name = ing.get("item_name", "")
+            if not item_name:
+                continue
+
+            name_lower = item_name.lower()
+            canonical_name = next(
+                (d["name"] for d in item_obj.io.all().values() if d.get("name", "").lower() == name_lower),
+                None,
+            )
+            lookup_name = canonical_name or item_name
+            details = item_obj.get_item_details(lookup_name) if canonical_name else None
+
+            if details:
+                price = item_obj.get_item_price(lookup_name, mode="per_unit")
+                entry = {
+                    "item_name": lookup_name,
+                    "purchased": False,
+                    "recognised": True,
+                    "tags": details.get("tags", []),
+                    "unit_price": float(price) if price else None,
+                    "price": float(price) if price else None,
+                    "units_needed": 1,
+                    "source_recipe_name": recipe_name,
+                }
+            else:
+                entry = {
+                    "item_name": item_name,
+                    "purchased": False,
+                    "recognised": False,
+                    "tags": [],
+                    "unit_price": None,
+                    "price": None,
+                    "units_needed": 1,
+                    "source_recipe_name": recipe_name,
+                }
+
+            effective_name = lookup_name if details else item_name
+            item_names_added.append(effective_name)
+            if effective_name.lower() not in existing_names:
+                data[list_id]["items"].append(entry)
+                existing_names.add(effective_name.lower())
+
+        # Record the recipe entry so clients can group items
+        entries = data[list_id].setdefault("freeform_recipe_entries", [])
+        already = any(e.get("recipe_id") == recipe_id for e in entries)
+        if not already:
+            entries.append({
+                "recipe_id": recipe_id,
+                "recipe_name": recipe_name,
+                "item_names": item_names_added,
+            })
+
+        self.io.write(data)
+        return True
+
     def freeform_remove_item(self, list_id: str, item_name: str) -> bool:
         """Remove the first matching item from a freeform list."""
         data = self.io.all()
