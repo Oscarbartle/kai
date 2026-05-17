@@ -415,7 +415,7 @@ class ShoppingListCartMixin:
             if child.widget():
                 child.widget().deleteLater()
 
-        has_anything = self.recipe_entries or self.extra_items
+        has_anything = self.recipe_entries or self.extra_items or self.preview_items
 
         if not has_anything:
             self.preview_items = []
@@ -430,33 +430,33 @@ class ShoppingListCartMixin:
             self._render_lt_section()
             return
 
-        recipe_obj = get_recipe()
-        total_servings = 0
-        for entry in self.recipe_entries:
-            doc = recipe_obj.get_recipe_details(entry["recipe_name"])
-            base = doc.get("servings", 1) if doc else 1
-            total_servings += base * entry.get("multiplier", 1)
-        self.serves_label.setText(f"Serves {total_servings}  ·" if total_servings > 0 else "")
+        # When refreshing from server, skip recomputation — use items as fetched.
+        if not self._suppress_autosave:
+            recipe_obj = get_recipe()
+            total_servings = 0
+            for entry in self.recipe_entries:
+                doc = recipe_obj.get_recipe_details(entry["recipe_name"])
+                base = doc.get("servings", 1) if doc else 1
+                total_servings += base * entry.get("multiplier", 1)
+            self.serves_label.setText(f"Serves {total_servings}  ·" if total_servings > 0 else "")
 
-        sl = get_shopping_list()
-        try:
-            self.preview_items = sl.compute_items(self.recipe_entries, True, self.extra_items)
-            self.lt_items = sl.compute_long_term_items(self.recipe_entries, self.extra_items)
-        except NotImplementedError:
-            # Remote mode: item computation happens server-side on generate.
-            self.preview_items = []
-            self.lt_items = []
+            sl = get_shopping_list()
+            try:
+                self.preview_items = sl.compute_items(self.recipe_entries, True, self.extra_items)
+                self.lt_items = sl.compute_long_term_items(self.recipe_entries, self.extra_items)
+            except NotImplementedError:
+                self.preview_items = []
+                self.lt_items = []
 
-        lt_names = {item["item_name"] for item in self.lt_items}
-        self.lt_have = {k: v for k, v in self.lt_have.items() if k in lt_names}
+            lt_names = {item["item_name"] for item in self.lt_items}
+            self.lt_have = {k: v for k, v in self.lt_have.items() if k in lt_names}
+
+            for lt_item in self.lt_items:
+                name = lt_item["item_name"]
+                if not self.lt_have.get(name, True):
+                    self.preview_items.append(lt_item)
 
         self._render_lt_section()
-
-        for lt_item in self.lt_items:
-            name = lt_item["item_name"]
-            if not self.lt_have.get(name, True):
-                self.preview_items.append(lt_item)
-
         self._render_preview()
         self.export_button.setEnabled(True)
         self.links_button.setEnabled(True)
