@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from kai.server import config
-from kai.server.routers import items, recipes, shopping_lists
+from kai.server.routers import items, price_history, recipes, shopping_lists
 
 
 @asynccontextmanager
@@ -45,6 +45,7 @@ def create_app() -> FastAPI:
 
     app.include_router(recipes.router)
     app.include_router(items.router)
+    app.include_router(price_history.router)
     app.include_router(shopping_lists.router)
 
     @app.get("/health")

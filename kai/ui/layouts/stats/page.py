@@ -4,9 +4,8 @@ from datetime import datetime
 
 from kai.objects.item import Item
 from kai.objects.recipe import Recipe
-from kai.objects.price_history import PriceHistory
 from kai.objects.shopping_list import ShoppingList
-from kai.core.backend import get_item, get_recipe, get_shopping_list
+from kai.core.backend import get_item, get_price_history, get_recipe, get_shopping_list
 from kai.core import settings as app_settings
 from kai.ui import theme
 from kai.ui.tokens import (
@@ -378,7 +377,7 @@ class StatsPage(QWidget):
 
         # ── gather all data ── #
         item_obj = get_item()
-        ph = PriceHistory()
+        ph = get_price_history()
         window = int(app_settings.get("price_history_window_days") or 30)
 
         all_docs = list(item_obj.io.all().items())  # [(id, doc)]

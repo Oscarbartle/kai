@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from kai.objects.item import Item
-from kai.objects.price_history import PriceHistory
+from kai.core.backend import get_price_history
 from kai.objects.order_history import OrderHistory
 from kai.core.backend import get_recipe, get_item, get_shopping_list
 from kai.ui import theme
@@ -75,7 +75,7 @@ class ItemView(QWidget):
 
         self.name = self.doc["name"]
         self._item_id = item_obj._get_id_by_name(self.name)
-        self._ph = PriceHistory()
+        self._ph = get_price_history()
         self._window = int(app_settings.get("price_history_window_days") or 30)
 
         self._build_ui()

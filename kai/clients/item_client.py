@@ -141,6 +141,8 @@ class ItemClient:
             r = s.post(f"{base_url()}/items/{iid}/refresh")
             r.raise_for_status()
             self._invalidate()
+            from kai.clients.price_history_client import PriceHistoryClient
+            PriceHistoryClient.invalidate()
             data = r.json()
             return data.get("online_data")
         except Exception:

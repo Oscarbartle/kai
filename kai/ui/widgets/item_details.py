@@ -1,6 +1,5 @@
 from kai.objects.item import Item
-from kai.objects.price_history import PriceHistory
-from kai.core.backend import get_item
+from kai.core.backend import get_item, get_price_history
 from kai.utils.format_date import format_date
 from kai.ui import theme
 from kai.ui.refresh_worker import run_refresh
@@ -91,7 +90,7 @@ class ItemDetails(QWidget):
         self._history_window = int(app_settings.get("price_history_window_days") or 30)
         if self._item_id and not self.is_unavailable and not self.is_out_of_stock:
             # one history fetch, compute both mins locally — avoids two O(snapshots) scans
-            history = PriceHistory().get(self._item_id)
+            history = get_price_history().get(self._item_id)
             if history:
                 from datetime import datetime, timedelta
                 cutoff = datetime.now() - timedelta(days=self._history_window)

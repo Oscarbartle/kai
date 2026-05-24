@@ -19,6 +19,14 @@ def get_item():
     return Item()
 
 
+def get_price_history():
+    if _is_remote():
+        from kai.clients.price_history_client import PriceHistoryClient
+        return PriceHistoryClient()
+    from kai.objects.price_history import PriceHistory
+    return PriceHistory()
+
+
 def get_shopping_list():
     if _is_remote():
         from kai.clients.shopping_list_client import ShoppingListClient
