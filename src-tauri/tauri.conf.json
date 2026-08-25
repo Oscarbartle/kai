@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "kai-scaffold",
+  "productName": "Kai",
   "version": "0.1.0",
-  "identifier": "com.oscar.kai-scaffold",
+  "identifier": "com.oscar.kai",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "kai-scaffold",
+        "title": "Kai",
         "width": 800,
         "height": 600
       }

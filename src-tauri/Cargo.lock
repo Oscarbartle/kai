@@ -1912,7 +1912,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kai-scaffold"
+name = "kai"
 version = "0.1.0"
 dependencies = [
  "serde",
