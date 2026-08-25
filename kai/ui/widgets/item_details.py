@@ -269,20 +269,18 @@ class ItemDetails(QWidget):
         self.all_time_low_badge = None
         self.n_day_low_badge = None
         if self._is_all_time_low:
-            badge = QLabel("★ all-time low")
+            badge = QLabel("◆")
             badge.setStyleSheet(
-                f"color: #92400e; background: #fef3c7; border-radius: 8px;"
-                f" padding: 1px 7px; font-size: {FS_TINY}px; font-weight: bold;"
+                f"color: {t.success}; font-size: {FS_BODY}px;"
             )
-            badge.setToolTip("This is the lowest price ever recorded for this item")
+            badge.setToolTip("All-time low — lowest price ever recorded for this item")
             self.all_time_low_badge = badge
         elif self._is_n_day_low:
-            badge = QLabel(f"↓ {self._history_window}d low")
+            badge = QLabel("↓")
             badge.setStyleSheet(
-                f"color: #14532d; background: #dcfce7; border-radius: 8px;"
-                f" padding: 1px 7px; font-size: {FS_TINY}px; font-weight: bold;"
+                f"color: {t.success}; font-size: {FS_BODY}px; font-weight: bold;"
             )
-            badge.setToolTip(f"Lowest price in the last {self._history_window} days")
+            badge.setToolTip(f"{self._history_window}-day low — lowest price in the last {self._history_window} days")
             self.n_day_low_badge = badge
 
     def add_layouts(self):

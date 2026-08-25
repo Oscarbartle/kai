@@ -386,13 +386,18 @@ class ShoppingListCartMixin:
             "lt_have": self.lt_have,
             "name": self.name_input.text(),
         }
-        self._draft_path.parent.mkdir(parents=True, exist_ok=True)
-        self._draft_path.write_text(json.dumps(draft), encoding="utf-8")
+        try:
+            self._draft_path.parent.mkdir(parents=True, exist_ok=True)
+            self._draft_path.write_text(json.dumps(draft), encoding="utf-8")
+        except OSError:
+            # Draft persistence is best-effort — if the data dir is unwritable
+            # (e.g. unmounted/read-only network volume) skip rather than crash.
+            pass
 
     def _load_draft(self):
-        if not self._draft_path.exists():
-            return
         try:
+            if not self._draft_path.exists():
+                return
             draft = json.loads(self._draft_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return
@@ -404,8 +409,11 @@ class ShoppingListCartMixin:
             self._refresh_cart()
 
     def _clear_draft(self):
-        if self._draft_path.exists():
-            self._draft_path.unlink()
+        try:
+            if self._draft_path.exists():
+                self._draft_path.unlink()
+        except OSError:
+            pass
 
     # ── auto-render ───────────────────────────────────────────── #
 
