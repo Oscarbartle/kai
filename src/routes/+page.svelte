@@ -1,7 +1,12 @@
 <script lang="ts">
+  interface SkuShell {
+    id: string;
+  }
+
   interface ItemShell {
     id: string;
     name: string;
+    skus: SkuShell[];
   }
 
   let items = $state<ItemShell[]>([]);
@@ -9,8 +14,13 @@
   function createItem() {
     items.push({
       id: crypto.randomUUID(),
-      name: "New Item",
+      name: "",
+      skus: [],
     });
+  }
+
+  function addSku(item: ItemShell) {
+    item.skus.push({ id: crypto.randomUUID() });
   }
 </script>
 
@@ -22,8 +32,22 @@
 <main>
   {#each items as item (item.id)}
     <div class="item-shell">
-      <p class="name">{item.name}</p>
+      <input
+        class="name"
+        type="text"
+        placeholder="Item name"
+        bind:value={item.name}
+      />
       <p class="id">{item.id}</p>
+
+      <div class="skus">
+        {#each item.skus as sku (sku.id)}
+          <div class="sku-shell">
+            <p class="id">sku: {sku.id}</p>
+          </div>
+        {/each}
+        <button class="add-sku" onclick={() => addSku(item)}>+ SKU</button>
+      </div>
     </div>
   {:else}
     <p class="empty">No items yet.</p>
@@ -84,8 +108,24 @@
   }
 
   .item-shell .name {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
     margin: 0 0 0.25rem;
     font-weight: 600;
+    font-size: 1rem;
+    font-family: inherit;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 0.25rem 0.35rem;
+    background: transparent;
+    color: inherit;
+  }
+
+  .item-shell .name:hover,
+  .item-shell .name:focus {
+    border-color: #ccc;
+    outline: none;
   }
 
   .item-shell .id {
@@ -93,6 +133,29 @@
     font-size: 0.75rem;
     color: #888;
     font-family: monospace;
+  }
+
+  .skus {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px dashed #ddd;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .sku-shell {
+    border: 1px dashed #ccc;
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .add-sku {
+    align-self: flex-start;
+    width: auto;
+    height: auto;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.8rem;
   }
 
   .empty {
@@ -122,6 +185,19 @@
     .item-shell {
       background: #3a3a3a;
       border-color: #4d4d4d;
+    }
+
+    .item-shell .name:hover,
+    .item-shell .name:focus {
+      border-color: #666;
+    }
+
+    .skus {
+      border-top-color: #4d4d4d;
+    }
+
+    .sku-shell {
+      border-color: #666;
     }
   }
 </style>
