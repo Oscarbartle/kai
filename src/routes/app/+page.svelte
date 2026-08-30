@@ -1522,16 +1522,17 @@
 		flex: 1 1 auto;
 		min-width: 0;
 		display: flex;
-		align-items: center;
+		/* flex-start, not center — a wrapped two-line name (see .name-text)
+		   shouldn't drag the edit-name pencil down into the middle of it. */
+		align-items: flex-start;
 		gap: 0.4rem;
 	}
 
 	.name-text {
 		flex: 1 1 auto;
 		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		white-space: normal;
+		overflow-wrap: break-word;
 		color: #fff;
 		font-weight: bold;
 		font-size: 1rem;
