@@ -572,7 +572,20 @@
 
 <style>
 	.overlay {
-		position: absolute;
+		/* fixed, not absolute: this is a sibling of the Pantry grid inside
+		   .content's own overflow-y:auto scroll region, not a wrapper
+		   around it. `absolute` would position (and size) this against
+		   that scrollable container's content box rather than the real
+		   viewport — meaning it renders at the container's scroll-top-0
+		   position (invisible if the Pantry was scrolled down when this
+		   opened) and scrolling "inside" this view would actually just be
+		   scrolling .content past this box's bottom edge, revealing the
+		   Pantry grid sitting right after it in the DOM. `fixed` pins this
+		   to the actual browser viewport regardless of any ancestor's
+		   scroll position, which is what "a separate full-window area"
+		   actually requires. Confirmed live: both symptoms reproduced with
+		   `absolute`, both gone with `fixed`. */
+		position: fixed;
 		inset: 0;
 		background: #1e1e1d;
 		color: #fff;

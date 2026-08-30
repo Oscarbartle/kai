@@ -455,7 +455,13 @@
 
 <style>
 	.settings {
-		position: absolute;
+		/* fixed, not absolute — currently mounts outside .content's own
+		   scrollable region so this doesn't actually reproduce the bug
+		   fixed in ItemDetail/RecipeDetail/ShoppingListDetail's identical
+		   .overlay, but "a separate full-window area" should mean the
+		   real viewport regardless of where this ends up mounted, not
+		   wherever its current parent happens to be. */
+		position: fixed;
 		inset: 0;
 		background: #1e1e1d;
 		color: #fff;

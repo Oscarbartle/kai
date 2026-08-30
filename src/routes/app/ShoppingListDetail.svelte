@@ -990,7 +990,12 @@
 
 <style>
 	.overlay {
-		position: absolute;
+		/* fixed, not absolute — see ItemDetail.svelte's identical comment.
+		   Same bug here: this is a sibling of the Shopping Lists grid
+		   inside .content's own scroll region, not a wrapper around it, so
+		   `absolute` positioned/sized it against that scrollable
+		   container instead of the real viewport. */
+		position: fixed;
 		inset: 0;
 		background: #1e1e1d;
 		color: #fff;
