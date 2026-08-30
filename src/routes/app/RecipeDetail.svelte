@@ -25,11 +25,6 @@
 		name: string;
 	}
 
-	interface Item {
-		id: number;
-		name: string;
-	}
-
 	// `g`/`mL`/`count` are real, shopping-relevant amounts (count for
 	// "3 onions"-style discrete amounts). `tsp`/`tbsp` are nominal —
 	// cooking reference only, never counted for shopping. No cup, no
@@ -41,6 +36,48 @@
 		name: string;
 		amount: number | null;
 		unit: string | null;
+	}
+
+	// Sidebar picker — same drag-and-drop pattern as
+	// ShoppingListDetail.svelte's item picker, just items only (a recipe
+	// links items, not other recipes). Existing items only, same as that
+	// picker: creating a brand-new item happens in the Pantry tab, not
+	// inline here.
+	interface PickerDbItem {
+		id: number;
+		name: string;
+		image_url: string | null;
+	}
+
+	interface PickerItem {
+		item: PickerDbItem;
+		image: string | null;
+	}
+
+	let pickerItems: PickerItem[] = $state([]);
+	let pickerSearch: string = $state('');
+	let filteredPickerItems = $derived(
+		pickerItems.filter((p) => p.item.name.toLowerCase().includes(pickerSearch.trim().toLowerCase()))
+	);
+
+	async function loadPickerItems() {
+		try {
+			const items: PickerDbItem[] = await invoke('list_items');
+			pickerItems = await Promise.all(
+				items.map(async (item) => {
+					let image = item.image_url;
+					if (!image) {
+						const skus = await invoke<{ images: string[] }[]>('list_skus_for_item', {
+							itemId: item.id
+						});
+						image = skus.find((s) => s.images[0])?.images[0] ?? null;
+					}
+					return { item, image };
+				})
+			);
+		} catch (e) {
+			error = String(e);
+		}
 	}
 
 	let { recipe, onClose, onDeleted }: {
@@ -87,27 +124,32 @@
 	let tagInput: string = $state('');
 	let tagError: string | null = $state(null);
 	let ingredients: Ingredient[] = $state([]);
-	let itemInput: string = $state('');
 	let itemError: string | null = $state(null);
-	let allItems: Item[] = $state([]);
 	let error: string | null = $state(null);
 
 	async function load() {
 		try {
-			const [recipeTags, recipeIngredients, items] = await Promise.all([
+			const [recipeTags, recipeIngredients] = await Promise.all([
 				invoke<Tag[]>('list_tags_for_recipe', { recipeId: recipe.id }),
-				invoke<Ingredient[]>('list_recipe_ingredients', { recipeId: recipe.id }),
-				invoke<Item[]>('list_items')
+				invoke<Ingredient[]>('list_recipe_ingredients', { recipeId: recipe.id })
 			]);
 			tags = recipeTags;
 			ingredients = recipeIngredients;
-			allItems = items;
 		} catch (e) {
 			error = String(e);
 		}
 	}
 
 	load();
+	loadPickerItems();
+
+	async function loadIngredients() {
+		try {
+			ingredients = await invoke<Ingredient[]>('list_recipe_ingredients', { recipeId: recipe.id });
+		} catch (e) {
+			itemError = String(e);
+		}
+	}
 
 	async function saveName() {
 		const trimmed = name.trim();
@@ -218,25 +260,44 @@
 		}
 	}
 
-	// Reuses an existing item by name (case-insensitive) if there's a
-	// match, otherwise creates a new one — mirrors how Items/Pantry never
-	// makes you pick from a rigid list.
-	async function addIngredient() {
-		const itemName = itemInput.trim();
-		if (!itemName) return;
+	function handleDragStart(e: DragEvent, itemId: number) {
+		e.dataTransfer?.setData('application/json', JSON.stringify({ itemId }));
+	}
+
+	// Dropping an item that's already an ingredient used to risk a
+	// duplicate/failed insert (recipe_items is keyed on recipe+item) —
+	// same guard as ShoppingListDetail's identical drop handler: block
+	// it outright with an explanation instead, the amount/unit fields on
+	// the existing widget are how you change it.
+	let duplicateWarning: string | null = $state(null);
+
+	async function handleDrop(e: DragEvent) {
+		e.preventDefault();
+		const raw = e.dataTransfer?.getData('application/json');
+		if (!raw) return;
+		const { itemId } = JSON.parse(raw) as { itemId: number };
+		if (ingredients.some((i) => i.item_id === itemId)) {
+			const name = pickerItems.find((p) => p.item.id === itemId)?.item.name ?? 'This item';
+			duplicateWarning = `${name} is already an ingredient — use its amount/unit fields to change it`;
+			return;
+		}
+		await addIngredient(itemId);
+	}
+
+	// Defaults the new link to unit 'count' (matching every other blank
+	// amount+unit pair in this app) right away, rather than leaving unit
+	// unset until the first edit — same as the old text-input flow did.
+	async function addIngredient(itemId: number) {
 		itemError = null;
 		try {
-			let item = allItems.find((i) => i.name.toLowerCase() === itemName.toLowerCase());
-			if (!item) {
-				item = await invoke<Item>('create_item', { name: itemName });
-				allItems.push(item);
-			}
-			await invoke('add_item_to_recipe', { recipeId: recipe.id, itemId: item.id });
-			if (!ingredients.some((i) => i.item_id === item!.id)) {
-				ingredients.push({ item_id: item.id, name: item.name, amount: null, unit: 'count' });
-				await updateIngredientQuantity(ingredients[ingredients.length - 1]);
-			}
-			itemInput = '';
+			await invoke('add_item_to_recipe', { recipeId: recipe.id, itemId });
+			await invoke('set_recipe_item_quantity', {
+				recipeId: recipe.id,
+				itemId,
+				amount: null,
+				unit: 'count'
+			});
+			await loadIngredients();
 		} catch (e) {
 			itemError = String(e);
 		}
@@ -280,6 +341,33 @@
 </script>
 
 <div class="overlay">
+	<aside class="sidebar">
+		<h2 class="sidebar-title">Items</h2>
+		<input class="picker-search" type="text" placeholder="Search…" bind:value={pickerSearch} />
+		<div class="picker-list">
+			{#each filteredPickerItems as pick (pick.item.id)}
+				<div
+					class="picker-widget"
+					draggable="true"
+					role="button"
+					tabindex="0"
+					ondragstart={(e) => handleDragStart(e, pick.item.id)}
+				>
+					<div class="picker-image">
+						{#if pick.image}
+							<img src={pick.image} alt="" />
+						{:else}
+							Image
+						{/if}
+					</div>
+					<span class="picker-name">{pick.item.name || 'Name'}</span>
+				</div>
+			{:else}
+				<p class="picker-empty">No items yet.</p>
+			{/each}
+		</div>
+	</aside>
+	<section class="content">
 	<div class="topbar">
 		<button class="back" onclick={onClose}>← Back</button>
 		<button class="delete-item" onclick={() => (confirmDeleteRecipe = true)}>Delete Recipe</button>
@@ -388,46 +476,58 @@
 
 	<section class="ingredients-section">
 		<h2>Ingredients</h2>
-		<datalist id="existing-items">
-			{#each allItems as item (item.id)}
-				<option value={item.name}></option>
-			{/each}
-		</datalist>
-		<div class="ingredients">
+		<div
+			class="drop-zone"
+			class:empty={ingredients.length === 0}
+			role="region"
+			aria-label="Drag items here from the sidebar to add them as ingredients"
+			ondragover={(e) => e.preventDefault()}
+			ondrop={handleDrop}
+		>
 			{#each ingredients as ingredient (ingredient.item_id)}
-				<div class="ingredient-row">
-					<input
-						class="ingredient-amount"
-						type="number"
-						min="0"
-						step="any"
-						placeholder="amount"
-						bind:value={ingredient.amount}
-						onblur={() => updateIngredientQuantity(ingredient)}
-					/>
-					<select
-						class="ingredient-unit"
-						bind:value={ingredient.unit}
-						onchange={() => updateIngredientQuantity(ingredient)}
+				{@const pick = pickerItems.find((p) => p.item.id === ingredient.item_id)}
+				<div class="dropped-card">
+					<button
+						class="remove-btn"
+						aria-label="Remove"
+						onclick={() => (confirmRemoveIngredient = ingredient)}
 					>
-						{#each UNITS as unit (unit)}
-							<option value={unit}>{unit}</option>
-						{/each}
-					</select>
-					<span class="ingredient-name">{ingredient.name}</span>
-					<button class="delete-ingredient" onclick={() => (confirmRemoveIngredient = ingredient)}>×</button>
+						×
+					</button>
+					<div class="dropped-header">
+						<div class="dropped-image">
+							{#if pick?.image}
+								<img src={pick.image} alt="" />
+							{:else}
+								Image
+							{/if}
+						</div>
+						<span class="dropped-name">{ingredient.name}</span>
+					</div>
+					<div class="dropped-footer">
+						<input
+							class="ingredient-amount"
+							type="number"
+							min="0"
+							step="any"
+							placeholder="amount"
+							bind:value={ingredient.amount}
+							onblur={() => updateIngredientQuantity(ingredient)}
+						/>
+						<select
+							class="ingredient-unit"
+							bind:value={ingredient.unit}
+							onchange={() => updateIngredientQuantity(ingredient)}
+						>
+							{#each UNITS as unit (unit)}
+								<option value={unit}>{unit}</option>
+							{/each}
+						</select>
+					</div>
 				</div>
 			{:else}
-				<p class="muted">No ingredients yet.</p>
+				<p class="drop-zone-message">Drag items here from the sidebar</p>
 			{/each}
-			<input
-				class="item-input"
-				type="text"
-				list="existing-items"
-				placeholder="+ item"
-				bind:value={itemInput}
-				onkeydown={(e) => e.key === 'Enter' && addIngredient()}
-			/>
 		</div>
 		{#if itemError}
 			<p class="inline-error">{itemError}</p>
@@ -448,7 +548,29 @@
 			onblur={saveMethod}
 		></textarea>
 	</section>
+	</section>
 </div>
+
+{#if duplicateWarning}
+	<div
+		class="warning-overlay"
+		onclick={() => (duplicateWarning = null)}
+		onkeydown={(e) => e.key === 'Escape' && (duplicateWarning = null)}
+		role="presentation"
+	>
+		<div
+			class="warning-box"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
+			role="dialog"
+			aria-modal="true"
+			tabindex="-1"
+		>
+			<p>{duplicateWarning}</p>
+			<button onclick={() => (duplicateWarning = null)}>OK</button>
+		</div>
+	</div>
+{/if}
 
 {#if confirmDeleteRecipe}
 	<ConfirmDialog
@@ -484,10 +606,236 @@
 		inset: 0;
 		background: #1e1e1d;
 		color: #fff;
+		display: flex;
+		z-index: 10;
+	}
+
+	/* Sidebar + drop-zone ingredient picker — same pattern as
+	   ShoppingListDetail's item picker, just items only (a recipe links
+	   items, not other recipes, so no recipes/items tab toggle here). */
+	.sidebar {
+		flex: 0 0 288px;
+		min-height: 0;
+		background: #191918;
+		padding: 1rem;
+		overflow-y: auto;
+		box-sizing: border-box;
+	}
+
+	.sidebar-title {
+		margin: 0 0 0.75rem;
+		font-size: 1rem;
+	}
+
+	.picker-search {
+		width: 100%;
+		box-sizing: border-box;
+		background: #232322;
+		border: 1px solid #333;
+		border-radius: 6px;
+		color: #fff;
+		font-size: 0.85rem;
+		padding: 0.4rem 0.6rem;
+	}
+
+	.picker-search:focus {
+		outline: none;
+		border-color: #3a4a55;
+	}
+
+	.picker-list {
+		margin-top: 1rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.picker-empty {
+		color: #999;
+		font-size: 0.85rem;
+	}
+
+	.picker-widget {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		background: #232322;
+		border-radius: 8px;
+		padding: 0.5rem 0.6rem;
+		cursor: grab;
+	}
+
+	.picker-widget:active {
+		cursor: grabbing;
+	}
+
+	.picker-image {
+		flex: 0 0 auto;
+		width: 36px;
+		height: 36px;
+		border-radius: 50%;
+		background: #fff;
+		color: #000;
+		font-size: 0.45rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		overflow: hidden;
+	}
+
+	.picker-image img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+
+	.picker-name {
+		flex: 1 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-weight: bold;
+		font-size: 0.8rem;
+	}
+
+	.content {
+		flex: 1 1 auto;
+		min-height: 0;
 		overflow-y: auto;
 		padding: 1.5rem;
 		box-sizing: border-box;
-		z-index: 10;
+	}
+
+	.drop-zone {
+		min-height: 140px;
+		background: #232322;
+		border: 2px dashed #333;
+		border-radius: 10px;
+		padding: 1rem;
+		display: flex;
+		flex-wrap: wrap;
+		align-content: flex-start;
+		gap: 0.85rem;
+	}
+
+	.drop-zone.empty {
+		justify-content: center;
+		align-content: center;
+	}
+
+	.drop-zone-message {
+		width: 100%;
+		color: #999;
+		font-size: 0.85rem;
+		font-weight: bold;
+		text-align: center;
+		margin: 0;
+	}
+
+	.dropped-card {
+		position: relative;
+		width: 220px;
+		background: #2c2c2b;
+		border-radius: 10px;
+		padding: 0.85rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+	}
+
+	.remove-btn {
+		position: absolute;
+		top: 0.5rem;
+		right: 0.5rem;
+		width: 1.4rem;
+		height: 1.4rem;
+		border: none;
+		border-radius: 50%;
+		background: #333;
+		color: #fff;
+		font-size: 0.85rem;
+		line-height: 1;
+		cursor: pointer;
+	}
+
+	.dropped-header {
+		display: flex;
+		align-items: center;
+		gap: 0.65rem;
+		padding-right: 1.5rem;
+	}
+
+	.dropped-image {
+		flex: 0 0 auto;
+		width: 48px;
+		height: 48px;
+		border-radius: 50%;
+		background: #fff;
+		color: #000;
+		font-size: 0.5rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		overflow: hidden;
+	}
+
+	.dropped-image img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+
+	.dropped-name {
+		flex: 1 1 auto;
+		min-width: 0;
+		overflow-wrap: break-word;
+		font-weight: bold;
+		font-size: 0.9rem;
+	}
+
+	.dropped-footer {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.warning-overlay {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.6);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 100;
+	}
+
+	.warning-box {
+		background: #232322;
+		border: 1px solid var(--color-warning, #c99a3d);
+		border-radius: 12px;
+		padding: 1.5rem;
+		width: 320px;
+		max-width: calc(100% - 2rem);
+		box-sizing: border-box;
+		color: #fff;
+		text-align: center;
+	}
+
+	.warning-box p {
+		margin: 0 0 1.5rem;
+		font-size: 0.95rem;
+	}
+
+	.warning-box button {
+		border: none;
+		border-radius: 6px;
+		background: var(--color-warning, #c99a3d);
+		color: #1e1e1d;
+		font-weight: bold;
+		font-size: 0.85rem;
+		padding: 0.5rem 1.5rem;
+		cursor: pointer;
 	}
 
 	.topbar {
@@ -732,26 +1080,6 @@
 		font-size: 1rem;
 	}
 
-	.muted {
-		color: #999;
-		font-size: 0.85rem;
-	}
-
-	.ingredients {
-		display: flex;
-		flex-direction: column;
-		gap: 0.4rem;
-	}
-
-	.ingredient-row {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		background: #232322;
-		border-radius: 8px;
-		padding: 0.5rem 0.75rem;
-	}
-
 	.ingredient-amount {
 		width: 4.5rem;
 		box-sizing: border-box;
@@ -771,40 +1099,6 @@
 		background: #1e1e1d;
 		color: #fff;
 		font-size: 0.8rem;
-	}
-
-	.ingredient-name {
-		flex: 1;
-		font-size: 0.9rem;
-	}
-
-	.delete-ingredient {
-		flex: 0 0 auto;
-		width: 1.5rem;
-		height: 1.5rem;
-		border: none;
-		border-radius: 50%;
-		background: #333;
-		color: #fff;
-		font-size: 0.9rem;
-		line-height: 1;
-		cursor: pointer;
-	}
-
-	.item-input {
-		align-self: flex-start;
-		border: 1px dashed #555;
-		border-radius: 999px;
-		padding: 0.3rem 0.7rem;
-		font-size: 0.8rem;
-		background: transparent;
-		color: #fff;
-		width: 8rem;
-	}
-
-	.item-input:focus {
-		outline: none;
-		border-color: #3a4a55;
 	}
 
 	.method {
