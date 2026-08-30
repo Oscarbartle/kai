@@ -181,11 +181,14 @@
 		ingredientCount: number;
 		nameDraft: string;
 		imageDraft: string;
-		// Sum of each linked ingredient's cheapest-SKU price — ingredients
-		// with no linked SKU are silently skipped, not treated as $0, and
-		// tsp/tbsp ingredients are excluded entirely (nominal, never real
-		// shopping amounts). null when *no* priceable ingredient has
-		// pricing at all (nothing to sum).
+		// Sum of each linked ingredient's cheapest-SKU price, but only for
+		// ingredients that would actually land on a shopping list when
+		// this recipe is added (see add_recipe_to_shopping_list's real
+		// skip rules) — tsp/tbsp (nominal), no amount set, and
+		// non-perishable ingredients are all excluded, same as they'd be
+		// excluded there. Ingredients with no linked SKU are silently
+		// skipped too, not treated as $0. null when *no* priceable
+		// ingredient has pricing at all (nothing to sum).
 		totalPrice: number | null;
 	}
 
@@ -294,20 +297,36 @@
 	async function loadRecipes() {
 		error = null;
 		try {
-			const recipes: DbRecipe[] = await invoke('list_recipes');
+			const [recipes, allItemsForPerishable] = await Promise.all([
+				invoke('list_recipes') as Promise<DbRecipe[]>,
+				invoke('list_items') as Promise<DbItem[]>
+			]);
+			// Keyed lookup, not a per-ingredient fetch — one extra list_items
+			// call up front instead of one per ingredient per recipe.
+			const perishableById = new Map(allItemsForPerishable.map((i) => [i.id, i.is_perishable]));
 			recipeCards = await Promise.all(
 				recipes.map(async (recipe) => {
 					const [tags, ingredients] = await Promise.all([
 						invoke('list_tags_for_recipe', { recipeId: recipe.id }) as Promise<Tag[]>,
 						invoke('list_recipe_ingredients', { recipeId: recipe.id }) as Promise<
-							{ item_id: number; unit: string | null }[]
+							{ item_id: number; amount: number | null; unit: string | null }[]
 						>
 					]);
-					// tsp/tbsp are nominal — cooking reference only, never fed
-					// into shopping-list/purchase math (see CLAUDE.md) — so they
-					// don't contribute to the recipe's total price either.
+					// Only ingredients that would actually land on a shopping
+					// list when this recipe is added count toward this preview
+					// total — the same three skip rules
+					// add_recipe_to_shopping_list applies server-side (see
+					// CLAUDE.md): tsp/tbsp (nominal, never real amounts), no
+					// amount set, and non-perishable (assumed already on
+					// hand). Summing every linked ingredient regardless
+					// (the old behavior) overstated what adding this recipe
+					// to a list actually costs.
 					const priceable = ingredients.filter(
-						(ing) => ing.unit !== 'tsp' && ing.unit !== 'tbsp'
+						(ing) =>
+							ing.unit !== 'tsp' &&
+							ing.unit !== 'tbsp' &&
+							ing.amount != null &&
+							perishableById.get(ing.item_id) !== false
 					);
 					const skuLists = await Promise.all(
 						priceable.map(
