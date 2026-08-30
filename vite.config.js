@@ -31,8 +31,16 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // 3. tell Vite to ignore watching `src-tauri`, `crates`, and the
+      // build output. `**/target/**` matters most: since the Cargo
+      // workspace conversion (Phase B), the actual build output moved
+      // from src-tauri's own target dir to one shared root-level
+      // `target/`, a sibling of src-tauri rather than something inside
+      // it — so `**/src-tauri/**` alone stopped covering it, and Vite's
+      // watcher would try to watch a .dll mid-compile and crash with
+      // EBUSY on Windows (confirmed live: "beforeDevCommand terminated
+      // with a non-zero status code").
+      ignored: ["**/src-tauri/**", "**/crates/**", "**/target/**"],
     },
   },
 }));
