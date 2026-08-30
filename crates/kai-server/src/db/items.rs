@@ -104,9 +104,13 @@ pub async fn delete(client: &Client, id: i64) -> Result<(), String> {
 }
 
 pub async fn list(client: &Client) -> Result<Vec<Item>, String> {
+    // Alphabetical (case-insensitive), not insertion order — matches the
+    // SQLite side (src-tauri/src/db/items.rs), which every item list in
+    // the app draws from either way (Pantry grid, the drag-and-drop
+    // sidebars in Recipe/Shopping List detail views).
     let rows = client
         .query(
-            &format!("SELECT {SELECT_COLUMNS} FROM items ORDER BY created_at DESC"),
+            &format!("SELECT {SELECT_COLUMNS} FROM items ORDER BY LOWER(name) ASC"),
             &[],
         )
         .await

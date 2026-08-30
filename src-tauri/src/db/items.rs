@@ -91,9 +91,13 @@ pub fn delete(conn: &Connection, id: i64) -> Result<(), String> {
 }
 
 pub fn list(conn: &Connection) -> Result<Vec<Item>, String> {
+    // Alphabetical (case-insensitive), not insertion order — this is the
+    // one query every item list in the app draws from (Pantry grid, the
+    // drag-and-drop sidebars in Recipe/Shopping List detail views), so
+    // fixing the order here fixes it everywhere at once.
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT {SELECT_COLUMNS} FROM items ORDER BY created_at DESC"
+            "SELECT {SELECT_COLUMNS} FROM items ORDER BY name COLLATE NOCASE ASC"
         ))
         .map_err(|e| format!("Couldn't prepare item list query: {e}"))?;
 
