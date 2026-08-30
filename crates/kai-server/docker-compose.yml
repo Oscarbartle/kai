@@ -21,6 +21,12 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      # First-ever startup runs initdb, which can take well over the old
+      # 50s retry budget on slower disks (confirmed live on Unraid: initdb's
+      # own fsync took ~28s alone) — failing checks during start_period
+      # don't count against `retries`, so this gives it real room before
+      # the dependent kai-server service gives up waiting.
+      start_period: 60s
 
   kai-server:
     build:
