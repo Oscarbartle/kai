@@ -5,19 +5,23 @@
 //! because the API doesn't send CORS headers, so the webview can't call
 //! it directly from the frontend.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 const BASE_URL: &str = "https://www.woolworths.co.nz";
 
-#[derive(Serialize, Clone, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct SkuPrice {
     pub original_price: Option<f64>,
     pub sale_price: Option<f64>,
     pub is_special: bool,
     pub save_percentage: Option<f64>,
+    /// ISO-ish timestamps ("2026-08-24T00:00:00"), straight from the API.
+    /// Only populated when `is_special` is true.
+    pub promotion_start_date: Option<String>,
+    pub promotion_end_date: Option<String>,
 }
 
-#[derive(Serialize, Clone, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct SkuSize {
     pub cup_price: Option<f64>,
     pub cup_measure: Option<String>,
@@ -25,7 +29,29 @@ pub struct SkuSize {
     pub volume_size: Option<String>,
 }
 
-#[derive(Serialize, Clone, Debug)]
+/// How this SKU is actually purchased. Woolworths' own `unit` field is
+/// "Each" for discrete items or "Kg" for loose/weighed ones — confirmed
+/// across produce, meat, seafood, and deli, no ambiguous cases found.
+/// `min`/`increment` (kg if by weight, whole units if not) are what let
+/// a recipe's needed quantity later get rounded to something actually
+/// orderable, e.g. "300g of loose onions" -> 0.3kg (0.1kg increments).
+///
+/// Some SKUs (e.g. loose onions) support *both* modes — the site itself
+/// offers a Weight/Quantity radio toggle at add-to-cart time. `unit` above
+/// is just the default; `supports_both_each_and_kg` + `average_weight_per_unit`
+/// (populated only when true) preserve that the other mode is available too,
+/// with the conversion factor between them.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct SkuQuantity {
+    pub unit: String,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+    pub increment: Option<f64>,
+    pub supports_both_each_and_kg: bool,
+    pub average_weight_per_unit: Option<f64>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Sku {
     pub provider: String,
     pub sku: String,
@@ -34,6 +60,7 @@ pub struct Sku {
     pub variety: Option<String>,
     pub price: SkuPrice,
     pub size: SkuSize,
+    pub quantity: SkuQuantity,
     pub availability_status: Option<String>,
     pub stock_level: Option<i64>,
     pub images: Vec<String>,
@@ -103,6 +130,7 @@ fn parse_sku(stock_code: &str, raw: &serde_json::Value) -> Result<Sku, String> {
 
     let price = raw.get("price").cloned().unwrap_or_default();
     let size = raw.get("size").cloned().unwrap_or_default();
+    let quantity = raw.get("quantity").cloned().unwrap_or_default();
 
     let images = raw
         .get("images")
@@ -148,12 +176,40 @@ fn parse_sku(stock_code: &str, raw: &serde_json::Value) -> Result<Sku, String> {
             sale_price: price.get("salePrice").and_then(|v| v.as_f64()),
             is_special: price.get("isSpecial").and_then(|v| v.as_bool()).unwrap_or(false),
             save_percentage: price.get("savePercentage").and_then(|v| v.as_f64()),
+            promotion_start_date: price
+                .get("promotionStartDate")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            promotion_end_date: price
+                .get("promotionEndDate")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
         },
         size: SkuSize {
             cup_price: size.get("cupPrice").and_then(|v| v.as_f64()),
             cup_measure: size.get("cupMeasure").and_then(|v| v.as_str()).map(str::to_string),
             package_type: size.get("packageType").and_then(|v| v.as_str()).map(str::to_string),
             volume_size: size.get("volumeSize").and_then(|v| v.as_str()).map(str::to_string),
+        },
+        quantity: SkuQuantity {
+            unit: raw
+                .get("unit")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Each")
+                .to_string(),
+            min: quantity.get("min").and_then(|v| v.as_f64()),
+            max: quantity.get("max").and_then(|v| v.as_f64()),
+            increment: quantity.get("increment").and_then(|v| v.as_f64()),
+            supports_both_each_and_kg: raw
+                .get("supportsBothEachAndKgPricing")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            // API sends 0.0 rather than omitting the field when not
+            // applicable — treat that as "no value" like everything else.
+            average_weight_per_unit: raw
+                .get("averageWeightPerUnit")
+                .and_then(|v| v.as_f64())
+                .filter(|v| *v > 0.0),
         },
         availability_status,
         stock_level,

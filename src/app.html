@@ -4,6 +4,37 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Kai</title>
+    <style>
+      body {
+        background: #1e1e1d;
+      }
+
+      /* Dark scrollbars everywhere (window chrome + every scrollable
+         div in every page) — WebView2 is Chromium, so both the
+         standard property and the -webkit- pseudo-elements apply. */
+      * {
+        scrollbar-color: #444 #1e1e1d;
+        scrollbar-width: thin;
+      }
+
+      ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: #1e1e1d;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: #444;
+        border-radius: 5px;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background: #555;
+      }
+    </style>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">

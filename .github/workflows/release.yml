@@ -1,0 +1,45 @@
+name: Release
+
+# Builds the Windows installer, signs the update artifacts, and publishes
+# a GitHub Release with a `latest.json` manifest — that manifest is what
+# Settings.svelte's in-app updater polls (see tauri.conf.json's
+# plugins.updater.endpoints). Mac build deliberately not wired up yet
+# (Windows first, per CLAUDE.md).
+#
+# Triggered by pushing a version tag (e.g. `v0.2.0`) — bump the version
+# in src-tauri/tauri.conf.json (and package.json, src-tauri/Cargo.toml)
+# to match before tagging, or the app's own reported version won't line
+# up with the release.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Kai ${{ github.ref_name }}"
+          releaseDraft: true
+          prerelease: false
