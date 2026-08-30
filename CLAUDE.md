@@ -105,11 +105,10 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
   supermarket can be added later via a settings/provider switch rather than
   hardcoding Woolworths assumptions everywhere. SKU rows already carry a
   `provider` column for this.
-- **Remote mode (future)**: if/when multi-device sync is needed, the plan is
-  an API service on the Unraid box backed by Postgres — mirroring the old
-  v1 `kai/server/` pattern — with clients (desktop, eventually mobile)
-  talking to it over HTTP. Not a direct Postgres connection from the Tauri
-  client. Not started.
+- **Remote mode**: an API service on the Unraid box backed by Postgres —
+  mirroring the old v1 `kai/server/` pattern — with the desktop client
+  talking to it over HTTP instead of a direct Postgres connection. In
+  progress — see "Phase B: shared remote database" below.
 - **Woolworths cart interaction — implemented** (`src-tauri/src/woolworths_cart.rs`,
   originally wired to a plain "Log in to Woolworths" + "Add all to
   Woolworths cart" button pair on the old flat `/shopping-list` page,
@@ -626,6 +625,180 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
   sequentially, reusing the same per-item refresh path — deliberately
   sequential across items too, not `Promise.all`, to avoid a burst of
   simultaneous requests to Woolworths.
+
+## Phase B: shared remote database — in progress
+
+- **Goal**: genuine shared multi-user use (Oscar + partner), not backup —
+  local and remote are fully separate datastores, no migration/merge
+  tooling. A settings toggle just points the app at one or the other.
+  Deployment target: Docker on Oscar's Unraid box, reachable via his own
+  domain + Cloudflare Tunnel (already solved, no work needed here); auth
+  is a single shared token sent on every request, not per-user login.
+  Plan lives at (session-local) `~/.claude/plans/parallel-petting-wilkes.md`.
+- **Stage 1 — done. Cargo workspace + `kai-shared` crate.** Root
+  `Cargo.toml` is now a virtual workspace manifest (`members = ["src-tauri",
+  "crates/kai-shared", "crates/kai-server"]`); the root `Cargo.lock`
+  supersedes what used to be `src-tauri/Cargo.lock`. `crates/kai-shared`
+  holds pure wire-format structs/consts with zero DB/framework deps
+  (`Item`, `Sku`/`StoredSku` + friends, `Tag`, `Recipe`,
+  `RecipeIngredient`/`VALID_UNITS`, `ShoppingList`/`ShoppingListLine`/
+  `OmissionReport`, `VALID_CHEAPEST_BY`) — moved verbatim out of
+  `src-tauri/src/db/*.rs` and `woolworths.rs`, which now just
+  `pub use kai_shared::...` them back in, so no other file's imports
+  changed. `Deserialize` was added to all of them (previously
+  `Serialize`-only) since they're the wire format `RemoteBackend` (Stage 4)
+  will (de)serialize over HTTP.
+- **Stage 2 — done. `Backend` trait abstraction, still SQLite-only.**
+  `src-tauri/src/backend/` has one `#[async_trait] pub trait XBackend` per
+  existing `db/*.rs` module (method names matching `commands.rs` function
+  names 1:1, e.g. `create_item`, `cheapest_sku_id` — chosen specifically so
+  combining all 8 into one blanket `Backend` trait can't collide), plus
+  `LocalBackend` (thin `Mutex<Connection>` wrapper delegating to `db::*`
+  unchanged). App state is now `Mutex<Arc<dyn Backend>>` instead of a bare
+  `Mutex<Connection>`; every `commands.rs` function is `async fn` and goes
+  through `backend.method(...).await` rather than calling `db::*` directly.
+  Zero behavior change — this stage was required to be invisible to the
+  user, confirmed via the existing 3-test `cargo test --lib` suite plus a
+  full manual `/app` smoke pass.
+- **Stage 3 — done. `kai-server`: standalone Postgres/Axum API.** New
+  crate, no `tauri`/`rusqlite` deps at all — Axum 0.8 + `tokio-postgres` +
+  `deadpool-postgres` (pool) + `refinery` (migrations, embedded into the
+  binary at compile time via `embed_migrations!`, so the runtime image
+  doesn't need the `migrations/` folder). SQL itself isn't shared with the
+  SQLite side (real dialect differences — identity columns vs
+  `AUTOINCREMENT`, native `BOOLEAN`, `TIMESTAMPTZ DEFAULT now()`,
+  `RETURNING id` vs `last_insert_rowid()`, `citext` extension in place of
+  `COLLATE NOCASE`, `JSONB` vs JSON-as-TEXT) — `kai-server/src/db/*.rs`
+  reimplements each `db::*` function's logic against Postgres by hand,
+  reusing only `kai-shared`'s types/validation consts as the shared source
+  of truth. Auth is Axum middleware checking `Authorization: Bearer
+  <token>` against `KAI_SHARED_TOKEN` on every route except `GET /health`
+  (unauthenticated, for Docker's healthcheck); `GET /status` is the
+  authenticated one-call reachability+auth check `test_remote_connection`
+  (Stage 4) will hit.
+  - **Verified live, not just compiled** — no Docker or local Postgres
+    install exists in the dev sandbox, so `postgresql_embedded` (a
+    dev-dependency that downloads and runs a genuine ephemeral Postgres
+    binary) backs two real integration tests: `tests/lifecycle.rs` (full
+    create-item → link-recipe → expand-onto-shopping-list →
+    non-perishable-skip → omission-report → cascade-delete flow, calling
+    `db::*` directly) and `tests/http.rs` (real `axum::serve` on a real
+    socket, real `reqwest` calls, proving routing/auth/JSON shape). Both
+    pass (`cargo test -p kai-server --test lifecycle` /
+    `--test http`).
+  - **Real bug this caught**: `list_omitted`'s `SELECT DISTINCT
+    items.id, items.name ... ORDER BY LOWER(items.name)` — legal in
+    SQLite, rejected by real Postgres (`ORDER BY` expression not in the
+    `DISTINCT` select list). Fixed by wrapping the `DISTINCT` query in a
+    subquery so the outer `ORDER BY` isn't constrained by it. Only found
+    because this got tested against a real Postgres rather than reviewed
+    statically.
+  - **Docker**: `crates/kai-server/Dockerfile` (multi-stage — `rust:1-slim-
+    bookworm` builder, `debian:bookworm-slim` runtime), `docker-
+    compose.yml` (kai-server + `postgres:16-alpine`, named volume —
+    comment notes the Unraid appdata bind-mount swap), `.env.example`
+    (`POSTGRES_PASSWORD`, `KAI_SHARED_TOKEN`). Build context is the repo
+    root, not the crate directory, since resolving the Cargo workspace
+    needs the whole manifest tree visible — the builder stage stubs
+    `src-tauri/src/{main,lib}.rs` with empty placeholders so that member
+    resolves without ever compiling its real Tauri/WebView deps (which
+    need Linux GUI packages the image doesn't have, and which `kai-server`
+    never depends on anyway). `smoke-test.sh` is a plain-curl manual
+    lifecycle check against a real running instance, for once this is
+    actually deployed — the automated tests above already cover the same
+    ground against embedded Postgres.
+  - **Not built yet, not tried**: an actual `docker build`/`docker compose
+    up` run — no Docker in this dev sandbox. First real verification of
+    the Docker path happens on Oscar's own machine or the Unraid box
+    (Stage 6).
+- **Stage 4 — done. `RemoteBackend` + the local/remote mode switch.**
+  `src-tauri/src/backend/remote.rs`: one `reqwest` HTTP call per trait
+  method, hand-mapped onto `kai-server`'s actual routes (verb, path, and
+  request/response JSON shape all matched by hand against the Stage 3
+  route files, not regenerated from anything) — e.g.
+  `set_item_perishable` is `PATCH /items/{id}/perishable
+  {"is_perishable": bool}`, `add_recipe_to_shopping_list` is `POST
+  /shopping-lists/{list_id}/recipes {"recipe_id", "target_servings"}`.
+  Errors surface the server's real `{"error": "..."}` body when there is
+  one (`AppError`'s shape) and fall back to `"Remote server returned
+  <status>"` when there isn't (the auth middleware returns a bare
+  `401` with no body — confirmed exercised by the test below, not just
+  assumed).
+  - **`LocalConn` — a connection kept alive regardless of mode.**
+    `backend::LocalConn` (`Arc<Mutex<Connection>>`) is `app.manage`d
+    separately from `ActiveBackend` and never dropped, so the *setting*
+    of which backend to use can always be read/written (`backend_mode`,
+    `remote_url`, `remote_token` — three new keys in the existing generic
+    `settings` table, see `db::settings::{get_backend_config,
+    set_backend_mode, set_remote_config}`) even while `ActiveBackend`
+    currently points at `RemoteBackend`, and so the local SQLite dataset
+    itself is never closed just because the app is in remote mode —
+    switching back to local reopens nothing, it just resumes routing
+    through the same connection. `LocalBackend` was changed to wrap this
+    same shared `Arc` (previously it owned its own `Mutex<Connection>`)
+    specifically so there's exactly one open connection to `kai.db` at
+    any time, not two.
+  - **`backend::resolve(&LocalConn) -> Arc<dyn Backend>`** is the single
+    place either backend ever gets constructed — called once at startup
+    (`lib.rs`'s `setup()`) and again by `set_backend_mode`/
+    `set_remote_config` (`commands.rs`) every time either setting
+    changes, so `ActiveBackend` is always rebuilt fresh from the saved
+    config rather than patched in place; the two commands persist their
+    setting through `LocalConn` directly (bypassing `ActiveBackend`
+    entirely, per the point above) and then swap the managed `Arc` in the
+    same call — no restart needed. `test_remote_connection` (a plain
+    `reqwest` call, not through `Backend`) is what Settings' future "Test
+    connection" button (Stage 5) hits — it takes the *currently-typed*
+    URL/token rather than the saved ones, so a user can check before
+    committing.
+  - **Verified against a real server, not just compiled.** A dev-only
+    `kai-server` path dependency (`src-tauri`'s tests only — never a real
+    dependency of the shipped app) plus the same `postgresql_embedded`
+    trick from Stage 3 backs `src-tauri/tests/remote_backend.rs`: spins
+    up a real embedded Postgres + a real `kai-server` via `axum::serve`,
+    then drives an actual `RemoteBackend` instance through one path per
+    domain (items, a full `Sku` fixture, tags, a recipe with a
+    quantities'd ingredient, a shopping list expanded from that recipe,
+    delivery-fee round trip, the delete-guard's error text, and a
+    real-401-with-no-body auth failure). Passes
+    (`cargo test -p kai --test remote_backend`) — this is what actually
+    proves the hand-written route/verb/JSON mapping in `remote.rs`
+    matches Stage 3's server in fact, not just in the plan each side was
+    written from.
+- **Stage 5 — done. `Settings.svelte` "Remote server" section.** A
+  `[Local] [Remote]` segmented toggle (`.mode-toggle`, a new small widget —
+  the existing `.primary`/`.secondary` buttons didn't read as "currently
+  selected" the way this needs to); clicking the inactive one opens the
+  existing `ConfirmDialog` before it takes effect, since an unexplained
+  empty pantry right after switching could otherwise read as data loss to
+  a non-technical user (Oscar's partner). URL/token inputs (token as
+  `type="password"`) use the same implicit-save-on-blur pattern as
+  Delivery Fee, disabled while mode is local. A "Test connection" button +
+  status pill (matching the Woolworths section's) calls
+  `test_remote_connection` against whatever's *currently typed*, not
+  necessarily what's saved.
+  - **A real gap this surfaced, fixed before it shipped**: `set_backend_mode`
+    originally propagated `backend::resolve`'s error outright, which meant
+    picking "Remote" for the very first time (before any URL had ever been
+    saved) returned a hard error from the command — but the mode had
+    *already been persisted* by that point (`set_backend_mode`'s DB write
+    happens before `resolve` is even called), so the toggle would silently
+    desync: the saved setting says "remote" but the failed command means
+    the frontend never learns that and keeps showing "Local" selected.
+    Worse, the URL field is only enabled once mode is remote, so requiring
+    a URL to *already* exist before allowing the switch would have made it
+    impossible to ever enter one in the first place. Fixed with
+    `try_rebuild_active_backend` (`commands.rs`): the mode-switch commands
+    now always persist and always return the real saved config; the
+    `ActiveBackend` swap only happens if `resolve` succeeds, and silently
+    no-ops otherwise (the previously-active backend just keeps serving
+    until a subsequent `set_remote_config` call — with an actual URL —
+    succeeds). Caught by re-reading the two commands' error paths after
+    writing the UI around them, not by a test.
+- **Stage 6 (not started)**: real deployment — `docker compose up -d` on
+  the actual Unraid box, reachable through the real Cloudflare Tunnel URL,
+  desktop app pointed at it end-to-end from a second device if possible
+  (the actual multi-user proof).
 
 ## Other reference
 

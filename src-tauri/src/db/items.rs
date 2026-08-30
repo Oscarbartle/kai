@@ -1,20 +1,9 @@
 use rusqlite::{params, Connection};
-use serde::Serialize;
 
-/// Which metric the shopping-list auto-pick compares this item's linked
-/// SKUs by — see `shopping_list_items::cheapest_sku_id`. Validated here,
-/// not a DB constraint, same pattern as `recipe_items::VALID_UNITS`.
-pub const VALID_CHEAPEST_BY: &[&str] = &["total", "unit"];
-
-#[derive(Serialize, Clone, Debug)]
-pub struct Item {
-    pub id: i64,
-    pub name: String,
-    pub is_perishable: bool,
-    pub image_url: Option<String>,
-    pub cheapest_by: String,
-    pub created_at: String,
-}
+// Item/VALID_CHEAPEST_BY moved to kai-shared (Phase B: shared wire shape
+// between local SQLite and a future remote server) — see
+// crates/kai-shared/src/items.rs.
+pub use kai_shared::items::{Item, VALID_CHEAPEST_BY};
 
 const SELECT_COLUMNS: &str = "id, name, is_perishable, image_url, cheapest_by, created_at";
 

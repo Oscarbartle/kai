@@ -1,0 +1,16 @@
+node_modules
+/target
+/build
+/.svelte-kit
+/package
+.env
+.env.*
+!.env.example
+.git
+/.svelte-kit
+/src
+/static
+src-tauri/target
+src-tauri/gen
+src-tauri/icons
+crates/kai-server/target

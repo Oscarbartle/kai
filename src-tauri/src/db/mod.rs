@@ -17,10 +17,7 @@ pub mod tags;
 
 use rusqlite::Connection;
 use rusqlite_migration::{Migrations, M};
-use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
-
-pub type Db = Mutex<Connection>;
 
 fn migrations() -> Migrations<'static> {
     Migrations::new(vec![

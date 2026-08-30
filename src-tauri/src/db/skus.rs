@@ -1,18 +1,8 @@
 use crate::woolworths::{Sku, SkuPrice, SkuQuantity, SkuSize};
 use rusqlite::{params, Connection};
-use serde::Serialize;
 
-#[derive(Serialize, Clone, Debug)]
-pub struct StoredSku {
-    pub id: i64,
-    pub item_id: i64,
-    /// Trumps `items.cheapest_by` entirely when set — see
-    /// `shopping_list_items::cheapest_sku_id`. At most one SKU per item
-    /// can be preferred at a time (see `set_preferred`).
-    pub is_preferred: bool,
-    #[serde(flatten)]
-    pub sku: Sku,
-}
+// StoredSku moved to kai-shared (Phase B) — see crates/kai-shared/src/skus.rs.
+pub use kai_shared::skus::StoredSku;
 
 /// Persists a fetched `Sku` against an item. Re-saving the same
 /// provider+sku pair for the same item updates the cached fields

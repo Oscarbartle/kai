@@ -1,12 +1,8 @@
 use rusqlite::{params, Connection};
-use serde::Serialize;
 
-#[derive(Serialize, Clone, Debug)]
-pub struct ShoppingList {
-    pub id: i64,
-    pub name: String,
-    pub created_at: String,
-}
+// ShoppingList moved to kai-shared (Phase B) — see
+// crates/kai-shared/src/shopping_lists.rs.
+pub use kai_shared::shopping_lists::ShoppingList;
 
 pub fn create(conn: &Connection, name: &str) -> Result<ShoppingList, String> {
     conn.execute("INSERT INTO shopping_lists (name) VALUES (?1)", params![name])

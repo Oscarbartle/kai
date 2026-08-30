@@ -1,9 +1,16 @@
+// `backend`/`db` are `pub` so `tests/remote_backend.rs` (an external
+// integration test crate) can drive `RemoteBackend` and read the same
+// `kai_shared`-backed types the real app does — see that file for why a
+// real embedded Postgres + a real `kai-server` beats mocking the HTTP
+// layer here.
+pub mod backend;
 mod commands;
-mod db;
+pub mod db;
 mod woolworths;
 mod woolworths_cart;
 
-use std::sync::Mutex;
+use backend::ActiveBackend;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -14,7 +21,15 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let conn = db::init(app.handle())?;
-            app.manage(Mutex::new(conn) as db::Db);
+            // Always managed regardless of local/remote mode — see
+            // `backend::LocalConn`'s doc comment and CLAUDE.md's Phase B
+            // notes for why this connection outlives whichever `Backend`
+            // is currently active.
+            let local_conn: backend::LocalConn = Arc::new(Mutex::new(conn));
+            app.manage(local_conn.clone());
+
+            let active = backend::resolve(&local_conn)?;
+            app.manage(Mutex::new(active) as ActiveBackend);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -70,6 +85,10 @@ pub fn run() {
             commands::add_shopping_lists_to_cart,
             commands::get_delivery_fee,
             commands::set_delivery_fee,
+            commands::get_backend_config,
+            commands::set_backend_mode,
+            commands::set_remote_config,
+            commands::test_remote_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

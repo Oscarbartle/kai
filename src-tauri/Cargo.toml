@@ -18,6 +18,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+kai-shared = { path = "../crates/kai-shared" }
+async-trait = "0.1"
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
@@ -27,4 +29,13 @@ serde_json = "1"
 reqwest = { version = "0.12", features = ["json"] }
 rusqlite_migration = "2.6.0"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
+
+[dev-dependencies]
+# For tests/remote_backend.rs — a real embedded Postgres + a real
+# kai-server, proving RemoteBackend's HTTP calls actually match what the
+# server expects, not just that both sides compile against kai-shared.
+kai-server = { path = "../crates/kai-server" }
+postgresql_embedded = "0.21.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+axum = "0.8.9"
 

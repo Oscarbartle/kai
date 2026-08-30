@@ -1,15 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
 
-#[derive(Serialize, Clone, Debug)]
-pub struct Tag {
-    pub id: i64,
-    pub name: String,
-    /// User override for the sidebar toggle's emoji — `None` means "use
-    /// the auto-picked one" (a client-side guess off the name, see
-    /// +page.svelte). Never shown on the plain-text tag pills.
-    pub emoji: Option<String>,
-}
+// Tag moved to kai-shared (Phase B) — see crates/kai-shared/src/tags.rs.
+pub use kai_shared::tags::Tag;
 
 /// All tags that exist, regardless of what they're attached to — for
 /// reuse/autocomplete when tagging an item.

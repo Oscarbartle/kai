@@ -48,3 +48,43 @@ pub fn set_delivery_fee(conn: &Connection, fee: f64) -> Result<f64, String> {
     set(conn, DELIVERY_FEE_KEY, &fee.to_string())?;
     Ok(fee)
 }
+
+// Which `Backend` (see src-tauri/src/backend/) the app should route
+// through — local SQLite or a remote kai-server. Deliberately three plain
+// keys in this same generic table rather than dedicated columns: these
+// are meta-config about which backend to use, so (per CLAUDE.md's Phase B
+// notes) they always live here, in the *local* connection, regardless of
+// which backend is currently active — they can't live behind the thing
+// they configure.
+pub const BACKEND_MODE_KEY: &str = "backend_mode";
+pub const REMOTE_URL_KEY: &str = "remote_url";
+pub const REMOTE_TOKEN_KEY: &str = "remote_token";
+
+#[derive(serde::Serialize, Clone, Debug)]
+pub struct BackendConfig {
+    /// `"local"` or `"remote"`.
+    pub mode: String,
+    pub remote_url: Option<String>,
+    pub remote_token: Option<String>,
+}
+
+pub fn get_backend_config(conn: &Connection) -> Result<BackendConfig, String> {
+    Ok(BackendConfig {
+        mode: get(conn, BACKEND_MODE_KEY)?.unwrap_or_else(|| "local".to_string()),
+        remote_url: get(conn, REMOTE_URL_KEY)?,
+        remote_token: get(conn, REMOTE_TOKEN_KEY)?,
+    })
+}
+
+pub fn set_backend_mode(conn: &Connection, mode: &str) -> Result<(), String> {
+    if mode != "local" && mode != "remote" {
+        return Err(format!("Invalid backend mode '{mode}' — must be 'local' or 'remote'"));
+    }
+    set(conn, BACKEND_MODE_KEY, mode)
+}
+
+pub fn set_remote_config(conn: &Connection, url: &str, token: &str) -> Result<(), String> {
+    set(conn, REMOTE_URL_KEY, url)?;
+    set(conn, REMOTE_TOKEN_KEY, token)?;
+    Ok(())
+}

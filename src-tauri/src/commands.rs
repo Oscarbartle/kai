@@ -1,121 +1,126 @@
-//! Tauri command surface. Thin — all real logic lives in `db::*`
-//! (repository layer) or `woolworths` (provider fetch); commands just
-//! wire the frontend to those.
+//! Tauri command surface. Thin — all real logic lives one layer down,
+//! behind `Backend` (see `backend::mod`): either `db::*` (local SQLite)
+//! or a remote HTTP call, depending on the active mode. Commands
+//! themselves don't know or care which.
 
-use crate::db::{
-    items, recipe_items, recipes, settings, shopping_list_items, shopping_lists, skus, tags, Db,
-};
+use crate::backend::ActiveBackend;
+use crate::db::{items, recipe_items, recipes, shopping_list_items, shopping_lists, skus, tags};
 use crate::woolworths::Sku;
 use crate::woolworths_cart;
 use serde::Deserialize;
 use tauri::{Manager, State};
 
 #[tauri::command]
-pub fn create_item(db: State<Db>, name: String) -> Result<items::Item, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    items::create(&conn, &name)
+pub async fn create_item(backend: State<'_, ActiveBackend>, name: String) -> Result<items::Item, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.create_item(&name).await
 }
 
 #[tauri::command]
-pub fn list_items(db: State<Db>) -> Result<Vec<items::Item>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    items::list(&conn)
+pub async fn list_items(backend: State<'_, ActiveBackend>) -> Result<Vec<items::Item>, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.list_items().await
 }
 
 #[tauri::command]
-pub fn save_sku_to_item(
-    db: State<Db>,
+pub async fn save_sku_to_item(
+    backend: State<'_, ActiveBackend>,
     item_id: i64,
     sku: Sku,
 ) -> Result<skus::StoredSku, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    skus::save(&conn, item_id, &sku)
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.save_sku_to_item(item_id, &sku).await
 }
 
 #[tauri::command]
-pub fn list_skus_for_item(db: State<Db>, item_id: i64) -> Result<Vec<skus::StoredSku>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    skus::list_for_item(&conn, item_id)
+pub async fn list_skus_for_item(
+    backend: State<'_, ActiveBackend>,
+    item_id: i64,
+) -> Result<Vec<skus::StoredSku>, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.list_skus_for_item(item_id).await
 }
 
 #[tauri::command]
-pub fn update_item_name(db: State<Db>, item_id: i64, name: String) -> Result<items::Item, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    items::update_name(&conn, item_id, &name)
+pub async fn update_item_name(
+    backend: State<'_, ActiveBackend>,
+    item_id: i64,
+    name: String,
+) -> Result<items::Item, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.update_item_name(item_id, &name).await
 }
 
 #[tauri::command]
-pub fn set_item_perishable(
-    db: State<Db>,
+pub async fn set_item_perishable(
+    backend: State<'_, ActiveBackend>,
     item_id: i64,
     is_perishable: bool,
 ) -> Result<items::Item, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    items::set_perishable(&conn, item_id, is_perishable)
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.set_item_perishable(item_id, is_perishable).await
 }
 
 #[tauri::command]
-pub fn set_item_image_url(
-    db: State<Db>,
+pub async fn set_item_image_url(
+    backend: State<'_, ActiveBackend>,
     item_id: i64,
     image_url: Option<String>,
 ) -> Result<items::Item, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    items::set_image_url(&conn, item_id, image_url.as_deref())
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.set_item_image_url(item_id, image_url.as_deref()).await
 }
 
 #[tauri::command]
-pub fn set_item_cheapest_by(
-    db: State<Db>,
+pub async fn set_item_cheapest_by(
+    backend: State<'_, ActiveBackend>,
     item_id: i64,
     cheapest_by: String,
 ) -> Result<items::Item, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    items::set_cheapest_by(&conn, item_id, &cheapest_by)
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.set_item_cheapest_by(item_id, &cheapest_by).await
 }
 
 #[tauri::command]
-pub fn delete_item(db: State<Db>, item_id: i64) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let recipes = recipe_items::list_recipes_for_item(&conn, item_id)?;
+pub async fn delete_item(backend: State<'_, ActiveBackend>, item_id: i64) -> Result<(), String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    let recipes = backend.list_recipes_for_item(item_id).await?;
     if !recipes.is_empty() {
         return Err(format!(
             "Can't delete — used in: {}. Remove it from those recipes first.",
             recipes.join(", ")
         ));
     }
-    items::delete(&conn, item_id)
+    backend.delete_item(item_id).await
 }
 
 #[tauri::command]
-pub fn delete_sku(db: State<Db>, sku_id: i64) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    skus::delete(&conn, sku_id)
+pub async fn delete_sku(backend: State<'_, ActiveBackend>, sku_id: i64) -> Result<(), String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.delete_sku(sku_id).await
 }
 
 #[tauri::command]
-pub fn set_sku_preferred(
-    db: State<Db>,
+pub async fn set_sku_preferred(
+    backend: State<'_, ActiveBackend>,
     sku_id: i64,
     is_preferred: bool,
 ) -> Result<skus::StoredSku, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    skus::set_preferred(&conn, sku_id, is_preferred)
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.set_sku_preferred(sku_id, is_preferred).await
 }
 
 /// Re-fetches one already-linked SKU from Woolworths and overwrites its
 /// cached row — the only way today to catch a price/special/stock
 /// change after a SKU was first added. Nothing does this automatically
-/// yet.
+/// yet. The Woolworths fetch itself always runs on this device (a public,
+/// unauthenticated lookup) — only the save half goes through `Backend`.
 #[tauri::command]
-pub async fn refresh_sku(db: State<'_, Db>, sku_id: i64) -> Result<skus::StoredSku, String> {
-    let stored = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        skus::get(&conn, sku_id)?
-    };
+pub async fn refresh_sku(backend: State<'_, ActiveBackend>, sku_id: i64) -> Result<skus::StoredSku, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    let stored = backend.get_sku(sku_id).await?;
     let fresh = crate::woolworths::fetch_woolworths_sku(stored.sku.sku.clone()).await?;
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    skus::save(&conn, stored.item_id, &fresh)
+    backend.save_sku_to_item(stored.item_id, &fresh).await
 }
 
 /// Same as `refresh_sku`, but every SKU linked to an item — one
@@ -123,209 +128,247 @@ pub async fn refresh_sku(db: State<'_, Db>, sku_id: i64) -> Result<skus::StoredS
 /// reported without losing progress on the ones already refreshed.
 #[tauri::command]
 pub async fn refresh_skus_for_item(
-    db: State<'_, Db>,
+    backend: State<'_, ActiveBackend>,
     item_id: i64,
 ) -> Result<Vec<skus::StoredSku>, String> {
-    let stored_list = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        skus::list_for_item(&conn, item_id)?
-    };
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    let stored_list = backend.list_skus_for_item(item_id).await?;
     let mut refreshed = Vec::with_capacity(stored_list.len());
     for stored in stored_list {
         let fresh = crate::woolworths::fetch_woolworths_sku(stored.sku.sku.clone()).await?;
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        refreshed.push(skus::save(&conn, item_id, &fresh)?);
+        refreshed.push(backend.save_sku_to_item(item_id, &fresh).await?);
     }
     Ok(refreshed)
 }
 
 #[tauri::command]
-pub fn list_tags(db: State<Db>) -> Result<Vec<tags::Tag>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    tags::list_all(&conn)
+pub async fn list_tags(backend: State<'_, ActiveBackend>) -> Result<Vec<tags::Tag>, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.list_tags().await
 }
 
 #[tauri::command]
-pub fn list_tags_for_item(db: State<Db>, item_id: i64) -> Result<Vec<tags::Tag>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    tags::list_for_item(&conn, item_id)
+pub async fn list_tags_for_item(
+    backend: State<'_, ActiveBackend>,
+    item_id: i64,
+) -> Result<Vec<tags::Tag>, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.list_tags_for_item(item_id).await
 }
 
 #[tauri::command]
-pub fn add_tag_to_item(db: State<Db>, item_id: i64, name: String) -> Result<tags::Tag, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    tags::add_to_item(&conn, item_id, &name)
+pub async fn add_tag_to_item(
+    backend: State<'_, ActiveBackend>,
+    item_id: i64,
+    name: String,
+) -> Result<tags::Tag, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.add_tag_to_item(item_id, &name).await
 }
 
 #[tauri::command]
-pub fn remove_tag_from_item(db: State<Db>, item_id: i64, tag_id: i64) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    tags::remove_from_item(&conn, item_id, tag_id)
+pub async fn remove_tag_from_item(
+    backend: State<'_, ActiveBackend>,
+    item_id: i64,
+    tag_id: i64,
+) -> Result<(), String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.remove_tag_from_item(item_id, tag_id).await
 }
 
 /// Shared by Pantry and Recipe Book — the Tags sidebar's "swap emoji"
 /// affordance. `emoji: None` clears the override back to the
 /// auto-picked one.
 #[tauri::command]
-pub fn set_tag_emoji(db: State<Db>, tag_id: i64, emoji: Option<String>) -> Result<tags::Tag, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    tags::set_emoji(&conn, tag_id, emoji.as_deref())
+pub async fn set_tag_emoji(
+    backend: State<'_, ActiveBackend>,
+    tag_id: i64,
+    emoji: Option<String>,
+) -> Result<tags::Tag, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.set_tag_emoji(tag_id, emoji.as_deref()).await
 }
 
 #[tauri::command]
-pub fn create_recipe(db: State<Db>, name: String) -> Result<recipes::Recipe, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    recipes::create(&conn, &name)
+pub async fn create_recipe(backend: State<'_, ActiveBackend>, name: String) -> Result<recipes::Recipe, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.create_recipe(&name).await
 }
 
 #[tauri::command]
-pub fn list_recipes(db: State<Db>) -> Result<Vec<recipes::Recipe>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    recipes::list(&conn)
+pub async fn list_recipes(backend: State<'_, ActiveBackend>) -> Result<Vec<recipes::Recipe>, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.list_recipes().await
 }
 
 #[tauri::command]
-pub fn update_recipe_name(
-    db: State<Db>,
+pub async fn update_recipe_name(
+    backend: State<'_, ActiveBackend>,
     recipe_id: i64,
     name: String,
 ) -> Result<recipes::Recipe, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    recipes::update_name(&conn, recipe_id, &name)
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.update_recipe_name(recipe_id, &name).await
 }
 
 #[tauri::command]
-pub fn set_recipe_image_url(
-    db: State<Db>,
+pub async fn set_recipe_image_url(
+    backend: State<'_, ActiveBackend>,
     recipe_id: i64,
     image_url: Option<String>,
 ) -> Result<recipes::Recipe, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    recipes::set_image_url(&conn, recipe_id, image_url.as_deref())
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.set_recipe_image_url(recipe_id, image_url.as_deref()).await
 }
 
 #[tauri::command]
-pub fn delete_recipe(db: State<Db>, recipe_id: i64) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    recipes::delete(&conn, recipe_id)
+pub async fn delete_recipe(backend: State<'_, ActiveBackend>, recipe_id: i64) -> Result<(), String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.delete_recipe(recipe_id).await
 }
 
 #[tauri::command]
-pub fn add_item_to_recipe(db: State<Db>, recipe_id: i64, item_id: i64) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    recipe_items::add(&conn, recipe_id, item_id)
+pub async fn add_item_to_recipe(
+    backend: State<'_, ActiveBackend>,
+    recipe_id: i64,
+    item_id: i64,
+) -> Result<(), String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.add_item_to_recipe(recipe_id, item_id).await
 }
 
 #[tauri::command]
-pub fn remove_item_from_recipe(db: State<Db>, recipe_id: i64, item_id: i64) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    recipe_items::remove(&conn, recipe_id, item_id)
+pub async fn remove_item_from_recipe(
+    backend: State<'_, ActiveBackend>,
+    recipe_id: i64,
+    item_id: i64,
+) -> Result<(), String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.remove_item_from_recipe(recipe_id, item_id).await
 }
 
 #[tauri::command]
-pub fn list_recipe_ingredients(
-    db: State<Db>,
+pub async fn list_recipe_ingredients(
+    backend: State<'_, ActiveBackend>,
     recipe_id: i64,
 ) -> Result<Vec<recipe_items::RecipeIngredient>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    recipe_items::list_for_recipe(&conn, recipe_id)
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.list_recipe_ingredients(recipe_id).await
 }
 
 #[tauri::command]
-pub fn set_recipe_item_quantity(
-    db: State<Db>,
+pub async fn set_recipe_item_quantity(
+    backend: State<'_, ActiveBackend>,
     recipe_id: i64,
     item_id: i64,
     amount: Option<f64>,
     unit: Option<String>,
 ) -> Result<recipe_items::RecipeIngredient, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    recipe_items::set_quantity(&conn, recipe_id, item_id, amount, unit.as_deref())
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend
+        .set_recipe_item_quantity(recipe_id, item_id, amount, unit.as_deref())
+        .await
 }
 
 #[tauri::command]
-pub fn update_recipe_method(
-    db: State<Db>,
+pub async fn update_recipe_method(
+    backend: State<'_, ActiveBackend>,
     recipe_id: i64,
     method: String,
 ) -> Result<recipes::Recipe, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    recipes::update_method(&conn, recipe_id, &method)
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.update_recipe_method(recipe_id, &method).await
 }
 
 #[tauri::command]
-pub fn update_recipe_servings(
-    db: State<Db>,
+pub async fn update_recipe_servings(
+    backend: State<'_, ActiveBackend>,
     recipe_id: i64,
     servings: Option<i64>,
 ) -> Result<recipes::Recipe, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    recipes::update_servings(&conn, recipe_id, servings)
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.update_recipe_servings(recipe_id, servings).await
 }
 
 #[tauri::command]
-pub fn update_recipe_source_url(
-    db: State<Db>,
+pub async fn update_recipe_source_url(
+    backend: State<'_, ActiveBackend>,
     recipe_id: i64,
     source_url: String,
 ) -> Result<recipes::Recipe, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    recipes::update_source_url(&conn, recipe_id, &source_url)
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.update_recipe_source_url(recipe_id, &source_url).await
 }
 
 #[tauri::command]
-pub fn list_tags_for_recipe(db: State<Db>, recipe_id: i64) -> Result<Vec<tags::Tag>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    tags::list_for_recipe(&conn, recipe_id)
+pub async fn list_tags_for_recipe(
+    backend: State<'_, ActiveBackend>,
+    recipe_id: i64,
+) -> Result<Vec<tags::Tag>, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.list_tags_for_recipe(recipe_id).await
 }
 
 #[tauri::command]
-pub fn add_tag_to_recipe(db: State<Db>, recipe_id: i64, name: String) -> Result<tags::Tag, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    tags::add_to_recipe(&conn, recipe_id, &name)
+pub async fn add_tag_to_recipe(
+    backend: State<'_, ActiveBackend>,
+    recipe_id: i64,
+    name: String,
+) -> Result<tags::Tag, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.add_tag_to_recipe(recipe_id, &name).await
 }
 
 #[tauri::command]
-pub fn remove_tag_from_recipe(db: State<Db>, recipe_id: i64, tag_id: i64) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    tags::remove_from_recipe(&conn, recipe_id, tag_id)
+pub async fn remove_tag_from_recipe(
+    backend: State<'_, ActiveBackend>,
+    recipe_id: i64,
+    tag_id: i64,
+) -> Result<(), String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.remove_tag_from_recipe(recipe_id, tag_id).await
 }
 
 #[tauri::command]
-pub fn create_shopping_list(db: State<Db>, name: String) -> Result<shopping_lists::ShoppingList, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    shopping_lists::create(&conn, &name)
+pub async fn create_shopping_list(
+    backend: State<'_, ActiveBackend>,
+    name: String,
+) -> Result<shopping_lists::ShoppingList, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.create_shopping_list(&name).await
 }
 
 #[tauri::command]
-pub fn list_shopping_lists(db: State<Db>) -> Result<Vec<shopping_lists::ShoppingList>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    shopping_lists::list(&conn)
+pub async fn list_shopping_lists(
+    backend: State<'_, ActiveBackend>,
+) -> Result<Vec<shopping_lists::ShoppingList>, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.list_shopping_lists().await
 }
 
 #[tauri::command]
-pub fn update_shopping_list_name(
-    db: State<Db>,
+pub async fn update_shopping_list_name(
+    backend: State<'_, ActiveBackend>,
     list_id: i64,
     name: String,
 ) -> Result<shopping_lists::ShoppingList, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    shopping_lists::update_name(&conn, list_id, &name)
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.update_shopping_list_name(list_id, &name).await
 }
 
 #[tauri::command]
-pub fn delete_shopping_list(db: State<Db>, list_id: i64) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    shopping_lists::delete(&conn, list_id)
+pub async fn delete_shopping_list(backend: State<'_, ActiveBackend>, list_id: i64) -> Result<(), String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.delete_shopping_list(list_id).await
 }
 
 #[tauri::command]
-pub fn list_shopping_list_items(
-    db: State<Db>,
+pub async fn list_shopping_list_items(
+    backend: State<'_, ActiveBackend>,
     list_id: i64,
 ) -> Result<Vec<shopping_list_items::ShoppingListLine>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    shopping_list_items::list_for_list(&conn, list_id)
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.list_shopping_list_items(list_id).await
 }
 
 /// What's missing from the given list(s) — surfaced by `CartAdd.svelte`
@@ -333,73 +376,81 @@ pub fn list_shopping_list_items(
 /// skipped at add-time (nominal unit, non-perishable, ...) or a regular
 /// you've just run out of gets one last chance to be added.
 #[tauri::command]
-pub fn list_omitted_shopping_list_items(
-    db: State<Db>,
+pub async fn list_omitted_shopping_list_items(
+    backend: State<'_, ActiveBackend>,
     list_ids: Vec<i64>,
 ) -> Result<shopping_list_items::OmissionReport, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    shopping_list_items::list_omitted(&conn, &list_ids)
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.list_omitted_shopping_list_items(&list_ids).await
 }
 
 #[tauri::command]
-pub fn add_item_to_shopping_list(
-    db: State<Db>,
+pub async fn add_item_to_shopping_list(
+    backend: State<'_, ActiveBackend>,
     list_id: i64,
     item_id: i64,
     amount: Option<f64>,
     unit: Option<String>,
 ) -> Result<shopping_list_items::ShoppingListLine, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    shopping_list_items::add_item(&conn, list_id, item_id, amount, unit.as_deref(), None)
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend
+        .add_item_to_shopping_list(list_id, item_id, amount, unit.as_deref())
+        .await
 }
 
 #[tauri::command]
-pub fn add_recipe_to_shopping_list(
-    db: State<Db>,
+pub async fn add_recipe_to_shopping_list(
+    backend: State<'_, ActiveBackend>,
     list_id: i64,
     recipe_id: i64,
     target_servings: Option<i64>,
 ) -> Result<Vec<shopping_list_items::ShoppingListLine>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    shopping_list_items::add_recipe(&conn, list_id, recipe_id, target_servings)
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend
+        .add_recipe_to_shopping_list(list_id, recipe_id, target_servings)
+        .await
 }
 
 #[tauri::command]
-pub fn set_shopping_list_recipe_quantity(
-    db: State<Db>,
+pub async fn set_shopping_list_recipe_quantity(
+    backend: State<'_, ActiveBackend>,
     list_id: i64,
     recipe_id: i64,
     quantity: f64,
 ) -> Result<Vec<shopping_list_items::ShoppingListLine>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    shopping_list_items::set_recipe_quantity(&conn, list_id, recipe_id, quantity)
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend
+        .set_shopping_list_recipe_quantity(list_id, recipe_id, quantity)
+        .await
 }
 
 #[tauri::command]
-pub fn set_shopping_list_item_amount(
-    db: State<Db>,
+pub async fn set_shopping_list_item_amount(
+    backend: State<'_, ActiveBackend>,
     line_id: i64,
     amount: Option<f64>,
     unit: Option<String>,
 ) -> Result<shopping_list_items::ShoppingListLine, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    shopping_list_items::set_amount(&conn, line_id, amount, unit.as_deref())
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend
+        .set_shopping_list_item_amount(line_id, amount, unit.as_deref())
+        .await
 }
 
 #[tauri::command]
-pub fn set_shopping_list_item_sku(
-    db: State<Db>,
+pub async fn set_shopping_list_item_sku(
+    backend: State<'_, ActiveBackend>,
     line_id: i64,
     sku_id: Option<i64>,
 ) -> Result<shopping_list_items::ShoppingListLine, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    shopping_list_items::set_sku(&conn, line_id, sku_id)
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.set_shopping_list_item_sku(line_id, sku_id).await
 }
 
 #[tauri::command]
-pub fn remove_shopping_list_item(db: State<Db>, line_id: i64) -> Result<(), String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    shopping_list_items::remove(&conn, line_id)
+pub async fn remove_shopping_list_item(backend: State<'_, ActiveBackend>, line_id: i64) -> Result<(), String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.remove_shopping_list_item(line_id).await
 }
 
 fn round_to_increment(value: f64, increment: Option<f64>, min: Option<f64>) -> f64 {
@@ -537,6 +588,10 @@ fn raw_cart_need(amount: f64, unit: &str, sku: &Sku) -> Option<RawCartNeed> {
 /// re-requests it rather than hardcoding an Auth0 URL. `redirectUrl`
 /// just needs to be a valid Woolworths page for post-login to land
 /// on — the homepage, same as before this change.
+///
+/// Always local-device-only, regardless of local/remote data mode — this
+/// opens a native window and reads this device's own WebView2 cookie
+/// jar, nothing about it goes through `Backend`.
 #[tauri::command]
 pub async fn open_woolworths_login(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(win) = app.get_webview_window("woolworths-login") {
@@ -561,7 +616,8 @@ pub async fn open_woolworths_login(app: tauri::AppHandle) -> Result<(), String> 
 /// Reads the app's own WebView2 cookie store and asks Woolworths whether
 /// that session can actually reach the trolley — see
 /// `woolworths_cart::check_logged_in` for why this is a real request
-/// rather than a cookie-name check.
+/// rather than a cookie-name check. Always local-device-only, same
+/// reasoning as `open_woolworths_login`.
 #[tauri::command]
 pub async fn woolworths_login_status(window: tauri::WebviewWindow) -> Result<bool, String> {
     let jar = cookie_jar_from_window(&window)?;
@@ -573,20 +629,104 @@ pub async fn woolworths_login_status(window: tauri::WebviewWindow) -> Result<boo
 /// Settings.svelte to show/edit it, and by the Shopping Lists tab to show
 /// a combined total's cost with delivery included.
 #[tauri::command]
-pub fn get_delivery_fee(db: State<Db>) -> Result<f64, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    settings::get_delivery_fee(&conn)
+pub async fn get_delivery_fee(backend: State<'_, ActiveBackend>) -> Result<f64, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.get_delivery_fee().await
 }
 
 #[tauri::command]
-pub fn set_delivery_fee(db: State<Db>, fee: f64) -> Result<f64, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    settings::set_delivery_fee(&conn, fee)
+pub async fn set_delivery_fee(backend: State<'_, ActiveBackend>, fee: f64) -> Result<f64, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.set_delivery_fee(fee).await
+}
+
+/// The local/remote switch — see `backend::mod`'s `LocalConn`/`resolve`
+/// doc comments and CLAUDE.md's Phase B notes. Deliberately bypasses
+/// `ActiveBackend` for reading/writing the setting itself (always the
+/// local connection, regardless of which backend is currently active),
+/// then calls `backend::resolve` to rebuild `ActiveBackend` from the
+/// freshly-saved config in the same command — no restart needed, and no
+/// way for the two to drift since `resolve` is the only thing that ever
+/// constructs the active backend.
+#[tauri::command]
+pub async fn get_backend_config(
+    local_conn: State<'_, crate::backend::LocalConn>,
+) -> Result<crate::db::settings::BackendConfig, String> {
+    let conn = local_conn.lock().map_err(|e| e.to_string())?;
+    crate::db::settings::get_backend_config(&conn)
+}
+
+/// Swaps `ActiveBackend` only if `resolve` actually succeeds — picking
+/// "Remote" before a URL's ever been saved is a real, expected step of
+/// the flow (Settings' fields only unlock once mode is remote), not a
+/// user error, so it shouldn't fail the whole mode-switch. When this
+/// can't resolve yet, the previously active backend just keeps serving
+/// until a later `set_remote_config` call (with an actual URL) succeeds.
+fn try_rebuild_active_backend(local_conn: &crate::backend::LocalConn, active: &ActiveBackend) {
+    if let Ok(rebuilt) = crate::backend::resolve(local_conn) {
+        if let Ok(mut guard) = active.lock() {
+            *guard = rebuilt;
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn set_backend_mode(
+    mode: String,
+    local_conn: State<'_, crate::backend::LocalConn>,
+    active: State<'_, ActiveBackend>,
+) -> Result<crate::db::settings::BackendConfig, String> {
+    {
+        let conn = local_conn.lock().map_err(|e| e.to_string())?;
+        crate::db::settings::set_backend_mode(&conn, &mode)?;
+    }
+    try_rebuild_active_backend(&local_conn, &active);
+    let conn = local_conn.lock().map_err(|e| e.to_string())?;
+    crate::db::settings::get_backend_config(&conn)
+}
+
+#[tauri::command]
+pub async fn set_remote_config(
+    url: String,
+    token: String,
+    local_conn: State<'_, crate::backend::LocalConn>,
+    active: State<'_, ActiveBackend>,
+) -> Result<crate::db::settings::BackendConfig, String> {
+    {
+        let conn = local_conn.lock().map_err(|e| e.to_string())?;
+        crate::db::settings::set_remote_config(&conn, &url, &token)?;
+    }
+    try_rebuild_active_backend(&local_conn, &active);
+    let conn = local_conn.lock().map_err(|e| e.to_string())?;
+    crate::db::settings::get_backend_config(&conn)
+}
+
+/// What Settings.svelte's "Test connection" button calls — hits the
+/// server's `/status` directly with whatever URL/token are currently
+/// *typed*, not necessarily the saved ones, so a user can check before
+/// committing. Proves reachability and the token in one round trip.
+#[tauri::command]
+pub async fn test_remote_connection(url: String, token: String) -> Result<String, String> {
+    let url = url.trim_end_matches('/');
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("{url}/status"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach {url}: {e}"))?;
+    if resp.status().is_success() {
+        Ok("Connected".to_string())
+    } else if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+        Err("Reached the server, but it rejected the token".to_string())
+    } else {
+        Err(format!("Server responded with {}", resp.status()))
+    }
 }
 
 /// Opens (or focuses) the real Woolworths cart page in its own app
 /// window. Shares the app's WebView2 profile with the login window, so
-/// it opens already signed in.
+/// it opens already signed in. Always local-device-only.
 #[tauri::command]
 pub async fn open_woolworths_cart(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(win) = app.get_webview_window("woolworths-cart") {
@@ -659,9 +799,16 @@ pub struct ExtraCartItem {
 /// once, not per list — see the grouping comment below for why that
 /// matters. Two lists that both want onions have to become one combined
 /// cart quantity, exactly like two lines within a single list do.
+///
+/// Mixed local/remote case: the shopping-list/SKU *reads* below go
+/// through `Backend` (work in either mode — a remote user's cart-add
+/// still needs the shared list data), but the cookie read and the actual
+/// Woolworths POST (`woolworths_cart::add_all`) are always this device's
+/// own session, never routed through `Backend` — that's not shared data,
+/// it's this device's own login.
 #[tauri::command]
 pub async fn add_shopping_lists_to_cart(
-    db: State<'_, Db>,
+    backend: State<'_, ActiveBackend>,
     window: tauri::WebviewWindow,
     list_ids: Vec<i64>,
     extra_items: Vec<ExtraCartItem>,
@@ -693,80 +840,78 @@ pub async fn add_shopping_lists_to_cart(
             .or_insert_with(|| (need, sku, vec![name]));
     }
 
-    let (cart_items, mut skipped) = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        let mut lines = Vec::new();
-        for list_id in &list_ids {
-            lines.extend(shopping_list_items::list_for_list(&conn, *list_id)?);
-        }
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
 
-        // Grouped by SKU code, not by shopping-list line: two lines can
-        // resolve to the same real-world product (e.g. one recipe wants
-        // "21 onions", another wants "500g onions", both against the
-        // same loose-onions SKU) and Woolworths' cart-add appears to
-        // *set* quantity per SKU rather than add to it — sending two
-        // separate calls for the same SKU silently overwrites the first
-        // with the second instead of combining them. Merging here, once,
-        // before any request goes out, is what actually fixes that. The
-        // same reasoning is why several lists merge together rather than
-        // being sent one list at a time.
-        let mut merged: std::collections::HashMap<String, (RawCartNeed, Sku, Vec<String>)> =
-            std::collections::HashMap::new();
-        let mut skipped = Vec::new();
-        for line in lines {
-            let (Some(amount), Some(unit), Some(sku_summary)) =
-                (line.amount, line.unit.clone(), line.sku.clone())
-            else {
-                skipped.push(line.item_name.clone());
-                continue;
-            };
-            let Ok(stored) = skus::get(&conn, sku_summary.id) else {
-                skipped.push(line.item_name.clone());
-                continue;
-            };
-            match raw_cart_need(amount, &unit, &stored.sku) {
-                Some(need) => merge_need(&mut merged, stored.sku.clone(), line.item_name.clone(), need),
-                None => skipped.push(line.item_name.clone()),
+    let mut lines = Vec::new();
+    for list_id in &list_ids {
+        lines.extend(backend.list_shopping_list_items(*list_id).await?);
+    }
+
+    // Grouped by SKU code, not by shopping-list line: two lines can
+    // resolve to the same real-world product (e.g. one recipe wants
+    // "21 onions", another wants "500g onions", both against the
+    // same loose-onions SKU) and Woolworths' cart-add appears to
+    // *set* quantity per SKU rather than add to it — sending two
+    // separate calls for the same SKU silently overwrites the first
+    // with the second instead of combining them. Merging here, once,
+    // before any request goes out, is what actually fixes that. The
+    // same reasoning is why several lists merge together rather than
+    // being sent one list at a time.
+    let mut merged: std::collections::HashMap<String, (RawCartNeed, Sku, Vec<String>)> =
+        std::collections::HashMap::new();
+    let mut skipped = Vec::new();
+    for line in lines {
+        let (Some(amount), Some(unit), Some(sku_summary)) =
+            (line.amount, line.unit.clone(), line.sku.clone())
+        else {
+            skipped.push(line.item_name.clone());
+            continue;
+        };
+        let Ok(stored) = backend.get_sku(sku_summary.id).await else {
+            skipped.push(line.item_name.clone());
+            continue;
+        };
+        match raw_cart_need(amount, &unit, &stored.sku) {
+            Some(need) => merge_need(&mut merged, stored.sku.clone(), line.item_name.clone(), need),
+            None => skipped.push(line.item_name.clone()),
+        }
+    }
+
+    // Extra picks from the omission-check pop-up — resolved the same
+    // way a real line would be (cheapest linked SKU, same as a fresh
+    // item-drop auto-picks), merged into the same map, but never
+    // written to `shopping_list_items`.
+    for extra in extra_items {
+        let Ok(item) = backend.get_item(extra.item_id).await else {
+            continue; // unknown item id — nothing sensible to report
+        };
+        let sku_id = backend.cheapest_sku_id(extra.item_id).await?;
+        let Some(sku_id) = sku_id else {
+            skipped.push(item.name);
+            continue;
+        };
+        let Ok(stored) = backend.get_sku(sku_id).await else {
+            skipped.push(item.name);
+            continue;
+        };
+        match raw_cart_need(extra.amount, &extra.unit, &stored.sku) {
+            Some(need) => merge_need(&mut merged, stored.sku.clone(), item.name, need),
+            None => skipped.push(item.name),
+        }
+    }
+
+    let cart_items = merged
+        .into_values()
+        .map(|(need, sku, names)| {
+            let (quantity, pricing_unit) = need.finalize(&sku);
+            woolworths_cart::CartLineInput {
+                name: names.join(" + "),
+                sku: sku.sku.clone(),
+                quantity,
+                pricing_unit: pricing_unit.to_string(),
             }
-        }
-
-        // Extra picks from the omission-check pop-up — resolved the same
-        // way a real line would be (cheapest linked SKU, same as a fresh
-        // item-drop auto-picks), merged into the same map, but never
-        // written to `shopping_list_items`.
-        for extra in extra_items {
-            let Ok(item) = items::get(&conn, extra.item_id) else {
-                continue; // unknown item id — nothing sensible to report
-            };
-            let sku_id = shopping_list_items::cheapest_sku_id(&conn, extra.item_id)?;
-            let Some(sku_id) = sku_id else {
-                skipped.push(item.name);
-                continue;
-            };
-            let Ok(stored) = skus::get(&conn, sku_id) else {
-                skipped.push(item.name);
-                continue;
-            };
-            match raw_cart_need(extra.amount, &extra.unit, &stored.sku) {
-                Some(need) => merge_need(&mut merged, stored.sku.clone(), item.name, need),
-                None => skipped.push(item.name),
-            }
-        }
-
-        let cart_items = merged
-            .into_values()
-            .map(|(need, sku, names)| {
-                let (quantity, pricing_unit) = need.finalize(&sku);
-                woolworths_cart::CartLineInput {
-                    name: names.join(" + "),
-                    sku: sku.sku.clone(),
-                    quantity,
-                    pricing_unit: pricing_unit.to_string(),
-                }
-            })
-            .collect::<Vec<_>>();
-        (cart_items, skipped)
-    };
+        })
+        .collect::<Vec<_>>();
 
     let jar = cookie_jar_from_window(&window)?;
 

@@ -1,0 +1,8 @@
+[package]
+name = "kai-shared"
+version = "0.1.0"
+edition = "2021"
+description = "Plain wire-format types and validation constants shared between the Tauri app (src-tauri) and the future remote server (kai-server). Deliberately dependency-light: no tauri, no rusqlite, no reqwest, no axum, no postgres crate — just serde. See CLAUDE.md's Phase B notes for why the SQL itself isn't shared, only these shapes."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

@@ -9,6 +9,7 @@
 	import { check, type Update } from '@tauri-apps/plugin-updater';
 	import { relaunch } from '@tauri-apps/plugin-process';
 	import { onMount } from 'svelte';
+	import ConfirmDialog from './ConfirmDialog.svelte';
 
 	let { onClose }: { onClose: () => void } = $props();
 
@@ -131,6 +132,95 @@
 		}
 		checkForUpdate();
 	});
+
+	// Local/remote switch — see CLAUDE.md's Phase B notes. `backend_mode`/
+	// `remote_url`/`remote_token` live in the *local* settings table
+	// regardless of which one is active (get_backend_config/
+	// set_backend_mode/set_remote_config on the Rust side), which is what
+	// lets switching back to local show exactly what was there before.
+	type BackendConfig = {
+		mode: 'local' | 'remote';
+		remote_url: string | null;
+		remote_token: string | null;
+	};
+
+	let backendMode: 'local' | 'remote' = $state('local');
+	let remoteUrl: string = $state('');
+	let remoteToken: string = $state('');
+	let remoteConfigError: string | null = $state(null);
+
+	// Gates the confirm dialog — an unexplained empty pantry right after
+	// switching could otherwise read as data loss to a non-technical user
+	// (Oscar's partner), so the switch itself always asks first.
+	let pendingModeSwitch: 'local' | 'remote' | null = $state(null);
+
+	async function loadBackendConfig() {
+		try {
+			const config = await invoke<BackendConfig>('get_backend_config');
+			backendMode = config.mode;
+			remoteUrl = config.remote_url ?? '';
+			remoteToken = config.remote_token ?? '';
+		} catch (e) {
+			remoteConfigError = String(e);
+		}
+	}
+
+	onMount(loadBackendConfig);
+
+	function requestModeSwitch(mode: 'local' | 'remote') {
+		if (mode === backendMode) return;
+		pendingModeSwitch = mode;
+	}
+
+	async function confirmModeSwitch() {
+		const mode = pendingModeSwitch;
+		pendingModeSwitch = null;
+		if (!mode) return;
+		remoteConfigError = null;
+		try {
+			const config = await invoke<BackendConfig>('set_backend_mode', { mode });
+			backendMode = config.mode;
+		} catch (e) {
+			remoteConfigError = String(e);
+		}
+	}
+
+	// Same implicit-save-on-blur pattern as Delivery Fee — no separate
+	// "Save" button. Saving also immediately rebuilds the active backend
+	// if remote mode is already on, so a token typo shows up on the next
+	// real request rather than silently lingering unsaved.
+	async function saveRemoteConfig() {
+		remoteConfigError = null;
+		try {
+			const config = await invoke<BackendConfig>('set_remote_config', {
+				url: remoteUrl,
+				token: remoteToken
+			});
+			remoteUrl = config.remote_url ?? '';
+			remoteToken = config.remote_token ?? '';
+		} catch (e) {
+			remoteConfigError = String(e);
+		}
+	}
+
+	type TestStatus = 'idle' | 'testing' | 'ok' | 'error';
+	let testStatus: TestStatus = $state('idle');
+	let testError: string | null = $state(null);
+
+	// Tests whatever's currently typed, not necessarily what's saved yet —
+	// same reasoning as save-on-blur: a user should be able to check a URL
+	// works before committing it.
+	async function testConnection() {
+		testStatus = 'testing';
+		testError = null;
+		try {
+			await invoke('test_remote_connection', { url: remoteUrl, token: remoteToken });
+			testStatus = 'ok';
+		} catch (e) {
+			testError = String(e);
+			testStatus = 'error';
+		}
+	}
 </script>
 
 <div class="settings">
@@ -268,7 +358,100 @@
 			<p class="error">{updateError}</p>
 		{/if}
 	</section>
+
+	<section class="setting-block">
+		<h2>Remote server</h2>
+		<p class="blurb">
+			Local keeps everything on this device. Remote points Kai at a shared server instead — the two
+			are separate datasets, switching doesn't move anything between them.
+		</p>
+
+		<div class="status-row">
+			<div class="mode-toggle">
+				<button
+					class:active={backendMode === 'local'}
+					onclick={() => requestModeSwitch('local')}
+				>
+					Local
+				</button>
+				<button
+					class:active={backendMode === 'remote'}
+					onclick={() => requestModeSwitch('remote')}
+				>
+					Remote
+				</button>
+			</div>
+		</div>
+
+		<div class="remote-fields">
+			<label class="field">
+				<span>Server URL</span>
+				<input
+					type="text"
+					placeholder="https://kai.yourdomain.com"
+					bind:value={remoteUrl}
+					disabled={backendMode !== 'remote'}
+					onblur={saveRemoteConfig}
+				/>
+			</label>
+			<label class="field">
+				<span>Shared token</span>
+				<input
+					type="password"
+					placeholder="the server's KAI_SHARED_TOKEN"
+					bind:value={remoteToken}
+					disabled={backendMode !== 'remote'}
+					onblur={saveRemoteConfig}
+				/>
+			</label>
+		</div>
+
+		<div class="status-row">
+			<span
+				class="status-pill"
+				class:on={testStatus === 'ok'}
+				class:off={testStatus === 'error'}
+				class:unknown={testStatus === 'idle' || testStatus === 'testing'}
+			>
+				{#if testStatus === 'idle'}
+					Not tested
+				{:else if testStatus === 'testing'}
+					Testing…
+				{:else if testStatus === 'ok'}
+					Connected
+				{:else}
+					Couldn't connect
+				{/if}
+			</span>
+			<button
+				class="secondary"
+				onclick={testConnection}
+				disabled={testStatus === 'testing' || !remoteUrl}
+			>
+				Test connection
+			</button>
+		</div>
+
+		{#if testStatus === 'error' && testError}
+			<p class="error">{testError}</p>
+		{/if}
+
+		{#if remoteConfigError}
+			<p class="error">{remoteConfigError}</p>
+		{/if}
+	</section>
 </div>
+
+{#if pendingModeSwitch}
+	<ConfirmDialog
+		message={pendingModeSwitch === 'remote'
+			? "Switch to the remote server? Kai will show what's stored there instead of what's on this device."
+			: "Switch back to local? Kai will show what's on this device instead of the remote server."}
+		confirmLabel="Switch"
+		onConfirm={confirmModeSwitch}
+		onCancel={() => (pendingModeSwitch = null)}
+	/>
+{/if}
 
 <style>
 	.settings {
@@ -387,6 +570,64 @@
 	.status-pill.unknown {
 		background: #333;
 		color: #999;
+	}
+
+	.mode-toggle {
+		display: flex;
+		background: #1e1e1d;
+		border: 1px solid #444;
+		border-radius: 6px;
+		padding: 0.2rem;
+		gap: 0.2rem;
+	}
+
+	.mode-toggle button {
+		background: none;
+		border: none;
+		color: #999;
+		font-weight: bold;
+		font-size: 0.85rem;
+		padding: 0.4rem 1rem;
+		border-radius: 4px;
+		cursor: pointer;
+	}
+
+	.mode-toggle button.active {
+		background: #3a4a55;
+		color: #fff;
+	}
+
+	.remote-fields {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		margin-top: 1rem;
+	}
+
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+		font-size: 0.8rem;
+		color: #999;
+	}
+
+	.field input {
+		background: #1e1e1d;
+		border: 1px solid #444;
+		border-radius: 6px;
+		color: #fff;
+		font-size: 0.9rem;
+		padding: 0.5rem 0.7rem;
+	}
+
+	.field input:focus {
+		outline: none;
+		border-color: #3a4a55;
+	}
+
+	.field input:disabled {
+		opacity: 0.5;
 	}
 
 	.primary,

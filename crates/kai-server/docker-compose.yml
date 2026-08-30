@@ -1,0 +1,46 @@
+# Run from this directory: `docker compose up -d`
+# (or from the repo root: `docker compose -f crates/kai-server/docker-compose.yml up -d`)
+#
+# Unraid: point `postgres`'s volume at an appdata bind mount instead of the
+# named volume below, e.g. `/mnt/user/appdata/kai/postgres:/var/lib/postgresql/data`,
+# so the data lives with everything else's appdata rather than in Docker's
+# own volume store.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: kai
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kai -d kai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  kai-server:
+    build:
+      context: ../..
+      dockerfile: crates/kai-server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://kai:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/kai
+      KAI_SHARED_TOKEN: ${KAI_SHARED_TOKEN:?set KAI_SHARED_TOKEN in .env}
+      PORT: 8787
+    ports:
+      - "8787:8787"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8787/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
