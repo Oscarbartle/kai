@@ -1469,8 +1469,8 @@
 
 	.image-placeholder {
 		flex: 0 0 auto;
-		width: 48px;
-		height: 48px;
+		width: 55px;
+		height: 55px;
 		border-radius: 50%;
 		background: #fff;
 		color: #000;
