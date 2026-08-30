@@ -9,7 +9,7 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8787}"
-TOKEN="${TOKEN:?set TOKEN to the server's KAI_SHARED_TOKEN}"
+TOKEN="${TOKEN:?set TOKEN to the server KAI_SHARED_TOKEN}"
 
 echo "-> GET /health (no auth needed)"
 curl -sf "$BASE_URL/health" | tee /dev/stderr | grep -q '"ok":true'
