@@ -77,6 +77,22 @@ async fn full_lifecycle() {
     assert_eq!(report.recipe_ingredients[0].item_id, salt.id);
     assert_eq!(report.recipe_ingredients[0].recipe_name, "Soup");
 
+    // --- Clear list: empties lines but the list itself survives ---
+    db::shopping_list_items::clear(&client, list.id).await.expect("clear list");
+    let on_list_after_clear = db::shopping_list_items::list_for_list(&client, list.id)
+        .await
+        .expect("list lines after clear");
+    assert!(on_list_after_clear.is_empty(), "clear should remove every line");
+    let list_still_exists = db::shopping_lists::get(&client, list.id).await;
+    assert!(list_still_exists.is_ok(), "the list itself should survive a clear");
+
+    // Put a line back — the cascade-delete check further down needs a
+    // real line to verify gets removed, not an already-empty list left
+    // over from the clear test just above.
+    db::shopping_list_items::add_item(&client, list.id, onion.id, Some(200.0), Some("g"), None)
+        .await
+        .expect("re-add onion after clearing");
+
     // --- cheapest_sku_id with no SKUs at all yields None, not an error ---
     let cheapest = db::shopping_list_items::cheapest_sku_id(&client, onion.id)
         .await

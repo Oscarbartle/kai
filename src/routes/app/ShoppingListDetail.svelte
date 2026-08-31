@@ -34,6 +34,23 @@
 		}
 	}
 
+	let confirmClearList: boolean = $state(false);
+
+	// Empties the list's lines but keeps the list itself (name, id) —
+	// distinct from Delete List, which removes the whole list.
+	async function clearList() {
+		try {
+			await invoke('clear_shopping_list', { listId: list.id });
+			// Stale otherwise: a recipe dropped again later would resume
+			// at whatever quantity it was last set to here rather than
+			// starting fresh at 1 (see this map's own declaration below).
+			recipeQuantities.clear();
+			await loadLines();
+		} catch (e) {
+			error = String(e);
+		}
+	}
+
 	let name: string = $state(list.name);
 
 	async function saveName() {
@@ -701,6 +718,13 @@
 			<button class="back" onclick={onClose}>← Back</button>
 			<div class="topbar-actions">
 				<CartAdd listIds={[list.id]} disabled={lines.length === 0} />
+				<button
+					class="clear-list"
+					disabled={droppedEntries.length === 0}
+					onclick={() => (confirmClearList = true)}
+				>
+					Clear List
+				</button>
 				<button class="delete-list" onclick={() => (confirmDeleteList = true)}>Delete List</button>
 			</div>
 		</div>
@@ -967,6 +991,18 @@
 	/>
 {/if}
 
+{#if confirmClearList}
+	<ConfirmDialog
+		message={`Clear every line from "${list.name || 'this list'}"? The list itself stays, this just empties it.`}
+		confirmLabel="Clear"
+		onConfirm={() => {
+			confirmClearList = false;
+			clearList();
+		}}
+		onCancel={() => (confirmClearList = false)}
+	/>
+{/if}
+
 {#if duplicateWarning}
 	<div
 		class="warning-overlay"
@@ -1153,6 +1189,22 @@
 		display: flex;
 		align-items: center;
 		gap: 0.6rem;
+	}
+
+	.clear-list {
+		background: none;
+		border: 1px solid #555;
+		border-radius: 6px;
+		color: #ccc;
+		font-weight: bold;
+		font-size: 0.85rem;
+		padding: 0.4rem 0.8rem;
+		cursor: pointer;
+	}
+
+	.clear-list:disabled {
+		opacity: 0.5;
+		cursor: default;
 	}
 
 	.delete-list {

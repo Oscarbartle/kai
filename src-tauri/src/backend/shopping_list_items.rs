@@ -39,6 +39,8 @@ pub trait ShoppingListItemsBackend {
         sku_id: Option<i64>,
     ) -> Result<ShoppingListLine, String>;
     async fn remove_shopping_list_item(&self, line_id: i64) -> Result<(), String>;
+    /// Empties a list's lines without deleting the list itself.
+    async fn clear_shopping_list(&self, list_id: i64) -> Result<(), String>;
     /// Used directly by `add_shopping_lists_to_cart` to resolve a SKU for
     /// an omission-check "extra item" the same way a fresh item-drop
     /// would — see `db::shopping_list_items::cheapest_sku_id`.

@@ -384,6 +384,9 @@ impl ShoppingListItemsBackend for RemoteBackend {
     async fn remove_shopping_list_item(&self, line_id: i64) -> Result<(), String> {
         self.delete(&format!("/shopping-list-items/{line_id}")).await
     }
+    async fn clear_shopping_list(&self, list_id: i64) -> Result<(), String> {
+        self.delete(&format!("/shopping-lists/{list_id}/items")).await
+    }
     async fn cheapest_sku_id(&self, item_id: i64) -> Result<Option<i64>, String> {
         self.get(&format!("/items/{item_id}/cheapest-sku")).await
     }

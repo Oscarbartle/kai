@@ -79,6 +79,7 @@ pub fn run() {
             commands::set_shopping_list_item_amount,
             commands::set_shopping_list_item_sku,
             commands::remove_shopping_list_item,
+            commands::clear_shopping_list,
             commands::open_woolworths_login,
             commands::open_woolworths_cart,
             commands::woolworths_login_status,

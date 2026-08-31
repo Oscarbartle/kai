@@ -307,6 +307,16 @@ pub fn remove(conn: &Connection, line_id: i64) -> Result<(), String> {
     Ok(())
 }
 
+/// Empties a list's lines without deleting the list itself — the
+/// "Clear list" button. Not an error if the list was already empty
+/// (0 rows deleted is a perfectly fine outcome here, unlike `remove`
+/// above where a missing line id is a real mistake to flag).
+pub fn clear(conn: &Connection, list_id: i64) -> Result<(), String> {
+    conn.execute("DELETE FROM shopping_list_items WHERE list_id = ?1", params![list_id])
+        .map_err(|e| format!("Couldn't clear list {list_id}: {e}"))?;
+    Ok(())
+}
+
 pub fn list_for_list(conn: &Connection, list_id: i64) -> Result<Vec<ShoppingListLine>, String> {
     let mut stmt = conn
         .prepare(&format!("{SELECT_LINE} WHERE sli.list_id = ?1 ORDER BY sli.id ASC"))

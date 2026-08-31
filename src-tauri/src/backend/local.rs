@@ -243,6 +243,9 @@ impl ShoppingListItemsBackend for LocalBackend {
     async fn remove_shopping_list_item(&self, line_id: i64) -> Result<(), String> {
         shopping_list_items::remove(&*self.lock()?, line_id)
     }
+    async fn clear_shopping_list(&self, list_id: i64) -> Result<(), String> {
+        shopping_list_items::clear(&*self.lock()?, list_id)
+    }
     async fn cheapest_sku_id(&self, item_id: i64) -> Result<Option<i64>, String> {
         shopping_list_items::cheapest_sku_id(&*self.lock()?, item_id)
     }

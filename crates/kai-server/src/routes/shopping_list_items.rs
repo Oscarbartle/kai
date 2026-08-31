@@ -11,7 +11,9 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route(
             "/shopping-lists/{list_id}/items",
-            get(list_shopping_list_items).post(add_item_to_shopping_list),
+            get(list_shopping_list_items)
+                .post(add_item_to_shopping_list)
+                .delete(clear_shopping_list),
         )
         .route("/shopping-lists/{list_id}/recipes", axum::routing::post(add_recipe_to_shopping_list))
         .route(
@@ -131,6 +133,12 @@ async fn set_shopping_list_item_sku(
 async fn remove_shopping_list_item(State(state): State<AppState>, Path(id): Path<i64>) -> Result<(), AppError> {
     let client = state.pool.get().await?;
     shopping_list_items::remove(&client, id).await?;
+    Ok(())
+}
+
+async fn clear_shopping_list(State(state): State<AppState>, Path(list_id): Path<i64>) -> Result<(), AppError> {
+    let client = state.pool.get().await?;
+    shopping_list_items::clear(&client, list_id).await?;
     Ok(())
 }
 

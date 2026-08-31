@@ -156,6 +156,21 @@ async fn remote_backend_round_trips_against_a_real_server() {
     assert_eq!(cheapest, Some(stored.id));
 
     remote.remove_shopping_list_item(on_list[0].id).await.expect("remove line");
+
+    // clear_shopping_list — the "Clear list" button's command. Re-add a
+    // line first so there's something real to clear, and confirm the
+    // list itself survives (distinct from delete_shopping_list below).
+    remote
+        .add_item_to_shopping_list(list.id, onion.id, Some(1.0), Some("count"))
+        .await
+        .expect("re-add a line to clear");
+    remote.clear_shopping_list(list.id).await.expect("clear list");
+    let after_clear = remote
+        .list_shopping_list_items(list.id)
+        .await
+        .expect("list lines after clear");
+    assert!(after_clear.is_empty(), "clear should remove every line");
+
     remote.delete_shopping_list(list.id).await.expect("delete list");
 
     // --- Settings (delivery fee) ---

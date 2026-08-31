@@ -453,6 +453,14 @@ pub async fn remove_shopping_list_item(backend: State<'_, ActiveBackend>, line_i
     backend.remove_shopping_list_item(line_id).await
 }
 
+/// Empties a list's lines without deleting the list itself — the
+/// "Clear list" button.
+#[tauri::command]
+pub async fn clear_shopping_list(backend: State<'_, ActiveBackend>, list_id: i64) -> Result<(), String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.clear_shopping_list(list_id).await
+}
+
 fn round_to_increment(value: f64, increment: Option<f64>, min: Option<f64>) -> f64 {
     let step = increment.filter(|i| *i > 0.0).unwrap_or(1.0);
     let mut rounded = (value / step).ceil() * step;
