@@ -571,6 +571,18 @@
 
 	let activeTagIds: Set<number> = $state(new Set());
 
+	// Bug fix: activeTagIds is shared across Pantry/Recipe Book (see
+	// visibleCards/visibleRecipeCards below) — selecting a tag while on
+	// one tab silently kept filtering the other by that same tag id
+	// after switching, hiding everything there since a recipe/item tag
+	// picked on one tab usually isn't used on the other at all. Clearing
+	// it on every tab switch means a filter never silently survives past
+	// the tab it was set on.
+	function switchTab(tab: Tab) {
+		activeTab = tab;
+		activeTagIds = new Set();
+	}
+
 	function toggleTagFilter(tagId: number) {
 		const next = new Set(activeTagIds);
 		if (next.has(tagId)) {
@@ -646,8 +658,10 @@
 
 	let recipeSearch: string = $state('');
 
-	// Same tag-filter set as Pantry, applied against recipe_tags instead
-	// of item_tags — whichever tab is active is what the sidebar filters.
+	// Same activeTagIds set as Pantry, applied against recipe_tags instead
+	// of item_tags — safe to share now that switchTab() clears it on
+	// every tab change (see that function's comment), so a Pantry
+	// selection can't silently carry over and filter this list too.
 	let visibleRecipeCards = $derived(
 		recipeCards
 			.filter(
@@ -692,7 +706,7 @@
 		<img src="/logo.png" alt="Kai" class="logo" />
 		<nav>
 			{#each tabs as tab}
-				<button class="tab" class:active={activeTab === tab.id} onclick={() => (activeTab = tab.id)}>
+				<button class="tab" class:active={activeTab === tab.id} onclick={() => switchTab(tab.id)}>
 					{tab.label}
 				</button>
 			{/each}
