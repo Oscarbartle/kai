@@ -42,6 +42,25 @@
 		}
 	}
 
+	// Shown only when asked for — this is a debugging aid for the case
+	// where the login window is plainly signed in but Kai still reports
+	// otherwise, which the status pill alone can't tell you anything
+	// about. Reports cookie *names* only, never values.
+	let diagnosis: string | null = $state(null);
+	let diagnosing: boolean = $state(false);
+
+	async function diagnose() {
+		diagnosing = true;
+		diagnosis = null;
+		try {
+			diagnosis = await invoke<string>('woolworths_session_debug');
+		} catch (e) {
+			diagnosis = String(e);
+		} finally {
+			diagnosing = false;
+		}
+	}
+
 	// The flat fee Woolworths adds at checkout — not fetched from
 	// anywhere, just a user-entered constant (see db::settings on the
 	// Rust side) so the Shopping Lists tab can show a combined total's
@@ -258,6 +277,9 @@
 			<button class="secondary" onclick={checkStatus} disabled={status === 'checking'}>
 				Check again
 			</button>
+			<button class="secondary" onclick={diagnose} disabled={diagnosing}>
+				{diagnosing ? 'Checking…' : 'Diagnose'}
+			</button>
 		</div>
 
 		{#if status === 'logged-in'}
@@ -269,6 +291,10 @@
 			<p class="hint">
 				After signing in, the window stays open — close it and hit <em>Check again</em>.
 			</p>
+		{/if}
+
+		{#if diagnosis}
+			<pre class="diagnosis">{diagnosis}</pre>
 		{/if}
 
 		{#if error}
@@ -673,5 +699,20 @@
 		margin: 0.9rem 0 0;
 		color: #ff8a80;
 		font-size: 0.8rem;
+	}
+
+	.diagnosis {
+		margin: 0.9rem 0 0;
+		padding: 0.75rem;
+		background: #1e1e1d;
+		border: 1px solid #444;
+		border-radius: 6px;
+		color: #ccc;
+		font-size: 0.72rem;
+		line-height: 1.5;
+		white-space: pre-wrap;
+		word-break: break-word;
+		max-height: 22rem;
+		overflow-y: auto;
 	}
 </style>

@@ -32,6 +32,9 @@ use serde::Serialize;
 const BASE_URL: &str = "https://www.woolworths.co.nz";
 const TROLLEY_ADD_URL: &str = "https://www.woolworths.co.nz/api/v1/trolleys/my/items";
 const TROLLEY_URL: &str = "https://www.woolworths.co.nz/api/v1/trolleys/my";
+/// Where Woolworths' own site now sends its cart traffic (confirmed by
+/// watching woolworths.co.nz: `POST /api/graphql?op-name=CustomerCart`).
+const GRAPHQL_URL: &str = "https://www.woolworths.co.nz/api/graphql";
 /// The user-facing cart page — confirmed by following the cart link on
 /// woolworths.co.nz itself. (`/trolley` is a 404; `/reviewtrolley`
 /// redirects to Auth0 login when logged out, which is the expected
@@ -178,6 +181,93 @@ async fn describe_response(response: reqwest::Response) -> String {
         let ellipsis = if body.chars().count() > 400 { "…" } else { "" };
         format!("Response from {url}:{location} {snippet}{ellipsis}")
     }
+}
+
+/// One-click diagnosis for "the webview is signed in but our request
+/// isn't". Reports what the cookie jar actually contains (names only —
+/// never values, these are live session credentials), then what both
+/// the legacy REST trolley endpoint and the GraphQL endpoint their site
+/// now uses actually say back.
+///
+/// Exists because "Not signed in" alone can't distinguish the two
+/// causes, which need opposite fixes: either we're reading the wrong
+/// cookies (a bug here), or the session is fine and the REST API itself
+/// no longer honours it (an upstream change we have to re-target).
+pub async fn session_debug(jar: &CookieJar) -> String {
+    let mut out = String::new();
+
+    let names: Vec<&str> = jar.cookies.iter().map(|(n, _)| n.as_str()).collect();
+    out.push_str(&format!("Cookies visible to Kai for www.woolworths.co.nz: {}
+", names.len()));
+    if names.is_empty() {
+        out.push_str("  (none — the session cookies aren't reaching this window at all)
+");
+    } else {
+        out.push_str(&format!("  {}
+", names.join(", ")));
+    }
+    out.push_str(&format!("  XSRF-TOKEN present: {}
+
+", jar.xsrf_token().is_some()));
+
+    let client = match api_client() {
+        Ok(c) => c,
+        Err(e) => return format!("{out}Couldn't build HTTP client: {e}"),
+    };
+
+    // Legacy REST endpoint the cart-add is currently built on.
+    out.push_str("GET /api/v1/trolleys/my (what Kai uses today):
+");
+    match client
+        .get(TROLLEY_URL)
+        .header("User-Agent", USER_AGENT)
+        .header("Accept", "application/json, text/plain, */*")
+        .header("X-Requested-With", "OnlineShopping.WebApp")
+        .header("Referer", format!("{BASE_URL}/"))
+        .header("Cookie", jar.cookie_header())
+        .send()
+        .await
+    {
+        Ok(r) => {
+            let status = r.status();
+            out.push_str(&format!("  {status}. {}
+
+", describe_response(r).await));
+        }
+        Err(e) => out.push_str(&format!("  request failed: {e}
+
+")),
+    }
+
+    // The GraphQL endpoint their own site now calls for the cart.
+    out.push_str("POST /api/graphql (what their site now uses):
+");
+    match client
+        .post(GRAPHQL_URL)
+        .header("User-Agent", USER_AGENT)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/plain, */*")
+        .header("Origin", BASE_URL)
+        .header("Referer", format!("{BASE_URL}/"))
+        .header("Cookie", jar.cookie_header())
+        .json(&serde_json::json!({
+            "operationName": "KaiProbe",
+            "variables": {},
+            "query": "query KaiProbe { __typename }",
+        }))
+        .send()
+        .await
+    {
+        Ok(r) => {
+            let status = r.status();
+            out.push_str(&format!("  {status}. {}
+", describe_response(r).await));
+        }
+        Err(e) => out.push_str(&format!("  request failed: {e}
+")),
+    }
+
+    out
 }
 
 async fn add_item_to_trolley(

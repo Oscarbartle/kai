@@ -632,6 +632,16 @@ pub async fn woolworths_login_status(window: tauri::WebviewWindow) -> Result<boo
     woolworths_cart::check_logged_in(&jar).await
 }
 
+/// Reports what Kai can actually see and what Woolworths actually says
+/// back — see `woolworths_cart::session_debug`. Exists for the case
+/// where the login window is plainly signed in but Kai still says it
+/// isn't, which "Not signed in" alone gives you no way to diagnose.
+#[tauri::command]
+pub async fn woolworths_session_debug(window: tauri::WebviewWindow) -> Result<String, String> {
+    let jar = cookie_jar_from_window(&window)?;
+    Ok(woolworths_cart::session_debug(&jar).await)
+}
+
 /// The flat delivery fee added at Woolworths checkout — a user-entered
 /// constant (see db::settings), not fetched from anywhere. Read by
 /// Settings.svelte to show/edit it, and by the Shopping Lists tab to show

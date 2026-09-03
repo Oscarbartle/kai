@@ -83,6 +83,7 @@ pub fn run() {
             commands::open_woolworths_login,
             commands::open_woolworths_cart,
             commands::woolworths_login_status,
+            commands::woolworths_session_debug,
             commands::add_shopping_lists_to_cart,
             commands::get_delivery_fee,
             commands::set_delivery_fee,
