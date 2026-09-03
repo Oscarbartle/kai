@@ -18,19 +18,37 @@
 //! any other login, this just reads the resulting cookies back
 //! afterward, from the app's own WebView2 profile.
 //!
-//! Cart-add is `POST /api/v1/trolleys/my/items` with
-//! `{"sku", "quantity", "pricingUnit"}` — confirmed working in v1 for
-//! `pricingUnit: "Each"`. `"Kg"` for weight-based SKUs is **not**
-//! verified against the real API (v1 never sent it — it always used an
-//! integer "Each" quantity) — it's a same-pattern extrapolation, not
-//! confirmed behavior. Also confirmed directly: the endpoint returns a
-//! flat 401 with zero cookies — there's no anonymous/guest cart, an
-//! authenticated session is a hard server-side requirement.
+//! Cart traffic goes through Woolworths' GraphQL API
+//! (`POST /api/graphql`), which is what their own site uses. The old
+//! REST endpoints this was originally built on
+//! (`GET/POST /api/v1/trolleys/my[/items]`) stopped honouring live
+//! sessions: confirmed from inside the app with 43 session cookies
+//! present (including the chunked `__session__0`/`__session__1` this
+//! auth stack sets), that endpoint still answered 401, while
+//! `/api/graphql` answered 200 with the same cookies. Note their site
+//! no longer sets `XSRF-TOKEN` at all, which the REST call used to send.
+//!
+//! The two operations used here, both taken from woolworths.co.nz's own
+//! bundles rather than guessed:
+//!   - `query GetMeProfile { me { id } }` — the login check. Answers 200
+//!     either way, so the body is the signal: a guest gets
+//!     "Field 'me' is not allowed for guest users." (BANNED_OPERATION).
+//!   - `mutation SetCartLineItemQuantity($input: SetCartLineItemQuantitiesInput!)`
+//!     — the cart write, taking
+//!     `cartLineItemQuantityUpdates: [{ variantKey, quantity }]`. It
+//!     *sets* a quantity rather than adding to it, exactly like the old
+//!     REST call did, so the merge-before-round logic in `commands.rs`
+//!     is unaffected.
+//!
+//! `variantKey` replaces the old `sku` + `pricingUnit` pair and is
+//! `{stock code}-EA` / `{stock code}-KG` — see `variant_key`.
+//!
+//! Product lookup (`woolworths.rs`) is a separate REST API and is
+//! unaffected — still returns 200.
 
 use serde::Serialize;
 
 const BASE_URL: &str = "https://www.woolworths.co.nz";
-const TROLLEY_ADD_URL: &str = "https://www.woolworths.co.nz/api/v1/trolleys/my/items";
 const TROLLEY_URL: &str = "https://www.woolworths.co.nz/api/v1/trolleys/my";
 /// Where Woolworths' own site now sends its cart traffic (confirmed by
 /// watching woolworths.co.nz: `POST /api/graphql?op-name=CustomerCart`).
@@ -97,29 +115,6 @@ fn api_client() -> Result<reqwest::Client, String> {
         .map_err(|e| format!("Couldn't build HTTP client: {e}"))
 }
 
-/// Maps a `/trolleys/my` status onto a login answer, or `None` when the
-/// status says nothing about being logged in and should be surfaced as
-/// a real error instead.
-///
-/// Split out because getting this wrong is exactly the bug it was:
-/// `check_logged_in` used a flat `status.is_success()`, so *every*
-/// non-2xx (a 404, a 500, a redirect landing somewhere odd) reported as
-/// "not signed in". That put the cart flow in a loop with no way out —
-/// prompt to sign in, user signs in successfully, next check returns
-/// the same non-auth failure, prompt again, forever, and nothing on
-/// screen ever mentioning the actual status behind it.
-fn login_outcome(status: reqwest::StatusCode) -> Option<bool> {
-    if status.is_success() {
-        Some(true)
-    } else if status == reqwest::StatusCode::UNAUTHORIZED
-        || status == reqwest::StatusCode::FORBIDDEN
-    {
-        Some(false)
-    } else {
-        None
-    }
-}
-
 /// Ground-truth login check: asks Woolworths whether this session can
 /// actually read the user's trolley. `GET /api/v1/trolleys/my` returns
 /// 401 with no valid session (confirmed by a zero-cookie request) and
@@ -139,26 +134,104 @@ fn login_outcome(status: reqwest::StatusCode) -> Option<bool> {
 /// and ask the API directly.
 pub async fn check_logged_in(jar: &CookieJar) -> Result<bool, String> {
     let client = api_client()?;
+    let value = graphql(
+        &client,
+        jar,
+        "GetMeProfile",
+        "query GetMeProfile { me { id } }",
+        serde_json::json!({}),
+    )
+    .await?;
+
+    if value
+        .get("data")
+        .and_then(|d| d.get("me"))
+        .and_then(|m| m.get("id"))
+        .is_some()
+    {
+        return Ok(true);
+    }
+
+    // Guests get a specific, documented refusal rather than an HTTP
+    // error — the endpoint answers 200 either way, so the *body* is the
+    // only signal. Confirmed against the live API while signed out:
+    //   "Field 'me' is not allowed for guest users."  (BANNED_OPERATION)
+    let errors = graphql_error_text(&value);
+    if errors.contains("not allowed for guest")
+        || errors.contains("BANNED_OPERATION")
+        || errors.contains("UNAUTHENTICATED")
+    {
+        return Ok(false);
+    }
+
+    Err(format!(
+        "Couldn't tell whether you're signed in to Woolworths. {}",
+        if errors.is_empty() { value.to_string() } else { errors }
+    ))
+}
+
+/// `{stock code}-EA` / `{stock code}-KG` — how the new API addresses a
+/// specific purchasable variant, replacing the old `sku` + `pricingUnit`
+/// pair. Verified against real products: an each-only line like diced
+/// tomatoes (311488) exposes only `311488-EA`, while a weight-capable
+/// one like loose onions (144329) or chicken thighs (57005) exposes both
+/// `-KG` and `-EA` — which is the same dual-mode idea the SKU model
+/// already carries as `supports_both_each_and_kg`.
+fn variant_key(sku: &str, pricing_unit: &str) -> String {
+    let suffix = if pricing_unit.eq_ignore_ascii_case("kg") { "KG" } else { "EA" };
+    format!("{sku}-{suffix}")
+}
+
+/// Collapses a GraphQL response's `errors[]` into one string. GraphQL
+/// answers 200 with errors in the body, so status alone says nothing.
+fn graphql_error_text(value: &serde_json::Value) -> String {
+    value
+        .get("errors")
+        .and_then(|e| e.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|e| e.get("message").and_then(|m| m.as_str()))
+                .collect::<Vec<_>>()
+                .join("; ")
+        })
+        .unwrap_or_default()
+}
+
+/// One POST to Woolworths' GraphQL endpoint, carrying the app's own
+/// session cookies. `op-name` goes in the query string the same way
+/// their site sends it.
+async fn graphql(
+    client: &reqwest::Client,
+    jar: &CookieJar,
+    op_name: &str,
+    query: &str,
+    variables: serde_json::Value,
+) -> Result<serde_json::Value, String> {
     let response = client
-        .get(TROLLEY_URL)
+        .post(format!("{GRAPHQL_URL}?op-name={op_name}"))
         .header("User-Agent", USER_AGENT)
+        .header("Content-Type", "application/json")
         .header("Accept", "application/json, text/plain, */*")
-        .header("X-Requested-With", "OnlineShopping.WebApp")
+        .header("Origin", BASE_URL)
         .header("Referer", format!("{BASE_URL}/"))
         .header("Cookie", jar.cookie_header())
+        .json(&serde_json::json!({
+            "operationName": op_name,
+            "variables": variables,
+            "query": query,
+        }))
         .send()
         .await
         .map_err(|e| format!("Couldn't reach Woolworths: {e}"))?;
 
     let status = response.status();
-    if let Some(logged_in) = login_outcome(status) {
-        return Ok(logged_in);
+    if !status.is_success() {
+        return Err(format!("Woolworths returned {status}. {}", describe_response(response).await));
     }
-    Err(format!(
-        "Signed in, but Woolworths wouldn't return the trolley: {}. Signing in again won't help — this isn't a sign-in problem. {}",
-        status,
-        describe_response(response).await
-    ))
+    response
+        .json()
+        .await
+        .map_err(|e| format!("Couldn't parse Woolworths' response: {e}"))
 }
 
 /// Final URL (after any redirects) plus a truncated body — the useful
@@ -270,51 +343,41 @@ pub async fn session_debug(jar: &CookieJar) -> String {
     out
 }
 
-async fn add_item_to_trolley(
+/// Sets a variant's quantity in the cart via the mutation their own
+/// site uses. Note *set*, not add — which is what the previous REST
+/// call did too, so the existing merge-before-round logic in
+/// `commands.rs` stays exactly as correct as it was.
+async fn set_cart_line_quantity(
     client: &reqwest::Client,
     jar: &CookieJar,
     sku: &str,
     quantity: f64,
     pricing_unit: &str,
 ) -> Result<bool, String> {
-    let mut req = client
-        .post(TROLLEY_ADD_URL)
-        .header("User-Agent", USER_AGENT)
-        .header("Content-Type", "application/json")
-        .header("Accept", "application/json, text/plain, */*")
-        .header("X-Requested-With", "OnlineShopping.WebApp")
-        .header("Origin", BASE_URL)
-        .header("Referer", format!("{BASE_URL}/"))
-        .header("Cookie", jar.cookie_header());
+    let value = graphql(
+        client,
+        jar,
+        "SetCartLineItemQuantity",
+        "mutation SetCartLineItemQuantity($input: SetCartLineItemQuantitiesInput!) {            setCartLineItemQuantity(input: $input) { __typename }          }",
+        serde_json::json!({
+            "input": {
+                "cartLineItemQuantityUpdates": [{
+                    "variantKey": variant_key(sku, pricing_unit),
+                    "quantity": quantity,
+                }]
+            }
+        }),
+    )
+    .await?;
 
-    if let Some(xsrf) = jar.xsrf_token() {
-        req = req.header("X-XSRF-TOKEN", xsrf);
+    let errors = graphql_error_text(&value);
+    if !errors.is_empty() {
+        return Err(errors);
     }
-
-    let response = req
-        .json(&serde_json::json!({
-            "sku": sku,
-            "quantity": quantity,
-            "pricingUnit": pricing_unit,
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {e}"))?;
-
-    let status = response.status();
-    if !status.is_success() {
-        // Body included deliberately: a bare "Woolworths returned 404"
-        // (what this used to say) gives nothing to act on. Whatever the
-        // API says about *why* — an unknown sku, no fulfilment context,
-        // an expired session — is in the body, and was being discarded.
-        return Err(format!("Woolworths returned {status}. {}", describe_response(response).await));
-    }
-
-    let body: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| format!("Couldn't parse response: {e}"))?;
-    Ok(body.get("isSuccessful").and_then(|v| v.as_bool()).unwrap_or(false))
+    Ok(value
+        .get("data")
+        .and_then(|d| d.get("setCartLineItemQuantity"))
+        .is_some())
 }
 
 pub struct CartLineInput {
@@ -343,7 +406,7 @@ pub async fn add_all(jar: CookieJar, items: Vec<CartLineInput>) -> Result<CartAd
     let mut results = Vec::with_capacity(items.len());
     for item in items {
         let outcome =
-            add_item_to_trolley(&client, &jar, &item.sku, item.quantity, &item.pricing_unit).await;
+            set_cart_line_quantity(&client, &jar, &item.sku, item.quantity, &item.pricing_unit).await;
         results.push(CartLineResult {
             name: item.name,
             sku: item.sku,
@@ -355,29 +418,4 @@ pub async fn add_all(jar: CookieJar, items: Vec<CartLineInput>) -> Result<CartAd
     }
 
     Ok(CartAddSummary { results })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use reqwest::StatusCode;
-
-    /// The reported bug: a 404 from the trolley endpoint was treated as
-    /// "not signed in", so signing in (successfully) never cleared the
-    /// prompt. Only a real auth rejection may answer `false`.
-    #[test]
-    fn only_auth_failures_mean_signed_out() {
-        assert_eq!(login_outcome(StatusCode::OK), Some(true));
-        assert_eq!(login_outcome(StatusCode::NO_CONTENT), Some(true));
-
-        assert_eq!(login_outcome(StatusCode::UNAUTHORIZED), Some(false));
-        assert_eq!(login_outcome(StatusCode::FORBIDDEN), Some(false));
-
-        // Everything else is a different problem entirely — surfaced as
-        // an error, never as "go sign in again".
-        assert_eq!(login_outcome(StatusCode::NOT_FOUND), None);
-        assert_eq!(login_outcome(StatusCode::INTERNAL_SERVER_ERROR), None);
-        assert_eq!(login_outcome(StatusCode::FOUND), None);
-        assert_eq!(login_outcome(StatusCode::TOO_MANY_REQUESTS), None);
-    }
 }

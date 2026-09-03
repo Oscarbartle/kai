@@ -109,6 +109,50 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
   mirroring the old v1 `kai/server/` pattern — with the desktop client
   talking to it over HTTP instead of a direct Postgres connection. In
   progress — see "Phase B: shared remote database" below.
+- **Woolworths migrated their cart to GraphQL (2026-08-31) — REST cart
+  API retired.** Symptom was an inescapable loop: sign in successfully,
+  app still says "not signed in", cart-add 404s. Root cause is upstream,
+  not ours — nothing in the cookie-reading path had changed since the
+  release where it worked. Confirmed from inside the app: 43 session
+  cookies visible (including the chunked `__session__0`/`__session__1`
+  this auth stack sets, and *no* `XSRF-TOKEN` any more), yet
+  `GET /api/v1/trolleys/my` still answered 401 while `POST /api/graphql`
+  answered 200 with those same cookies.
+  - Cart now goes through `POST /api/graphql` (what woolworths.co.nz
+    itself calls). Operations lifted from their own JS bundles, not
+    guessed:
+    - Login check: `query GetMeProfile { me { id } }`. Answers HTTP 200
+      either way — the *body* is the signal, a guest gets
+      `"Field 'me' is not allowed for guest users."` (BANNED_OPERATION).
+    - Cart write: `mutation SetCartLineItemQuantity($input:
+      SetCartLineItemQuantitiesInput!)`, taking
+      `cartLineItemQuantityUpdates: [{ variantKey, quantity }]`. Still
+      *sets* rather than adds, exactly like the old REST call, so the
+      merge-before-round logic in `commands.rs` is unaffected.
+  - **`variantKey` replaces `sku` + `pricingUnit`**: `{stock code}-EA` /
+    `{stock code}-KG`. Verified against real pantry SKUs — each-only
+    items (diced tomatoes 311488, colby 281810, pasta 727848) expose
+    only `-EA`, weight-capable ones (onions 144329, chicken thighs
+    57005) expose both. That's the same dual-mode idea already stored as
+    `supports_both_each_and_kg`.
+  - Introspection is disabled, but **validation errors leak input types**
+    — sending a wrong field returned the full
+    `input CartLineItemQuantitySetInput { variantKey: String! quantity:
+    Decimal! advertisementId: String }`. That's how the shape above was
+    established rather than guessed.
+  - Verified as far as an unauthenticated session allows: the real
+    mutation with real variables passes validation and fails *only* with
+    `"The operation 'setCartLineItemQuantity' is banned for cart type
+    'GuestCart'"` — shape correct, auth the only difference.
+  - **Product lookup is a separate REST API and is unaffected** —
+    `/api/v1/products/{sku}` still returns 200, so Pantry, SKU add and
+    price refresh keep working. Only the cart features broke.
+  - Settings → Woolworths account has a **Diagnose** button
+    (`woolworths_session_debug`) reporting visible cookie *names* (never
+    values), and what both endpoints actually answer — built because
+    "Not signed in" alone couldn't distinguish "wrong cookies" from
+    "endpoint retired", which need opposite fixes.
+
 - **Woolworths cart interaction — implemented** (`src-tauri/src/woolworths_cart.rs`,
   originally wired to a plain "Log in to Woolworths" + "Add all to
   Woolworths cart" button pair on the old flat `/shopping-list` page,
