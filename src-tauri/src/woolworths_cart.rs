@@ -81,6 +81,42 @@ impl CookieJar {
     }
 }
 
+/// API calls here must not follow redirects. `reqwest`'s default policy
+/// follows up to 10, and a 302 on a POST is replayed as a GET — so a
+/// session Woolworths wants to bounce to a login/landing page comes back
+/// as whatever *that* page returns (a 404, say) instead of as the
+/// redirect it actually was. Refusing to follow keeps the real status
+/// and `Location` visible.
+fn api_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| format!("Couldn't build HTTP client: {e}"))
+}
+
+/// Maps a `/trolleys/my` status onto a login answer, or `None` when the
+/// status says nothing about being logged in and should be surfaced as
+/// a real error instead.
+///
+/// Split out because getting this wrong is exactly the bug it was:
+/// `check_logged_in` used a flat `status.is_success()`, so *every*
+/// non-2xx (a 404, a 500, a redirect landing somewhere odd) reported as
+/// "not signed in". That put the cart flow in a loop with no way out —
+/// prompt to sign in, user signs in successfully, next check returns
+/// the same non-auth failure, prompt again, forever, and nothing on
+/// screen ever mentioning the actual status behind it.
+fn login_outcome(status: reqwest::StatusCode) -> Option<bool> {
+    if status.is_success() {
+        Some(true)
+    } else if status == reqwest::StatusCode::UNAUTHORIZED
+        || status == reqwest::StatusCode::FORBIDDEN
+    {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 /// Ground-truth login check: asks Woolworths whether this session can
 /// actually read the user's trolley. `GET /api/v1/trolleys/my` returns
 /// 401 with no valid session (confirmed by a zero-cookie request) and
@@ -99,7 +135,7 @@ impl CookieJar {
 /// whole point of this function is to stop guessing from cookie names
 /// and ask the API directly.
 pub async fn check_logged_in(jar: &CookieJar) -> Result<bool, String> {
-    let client = reqwest::Client::new();
+    let client = api_client()?;
     let response = client
         .get(TROLLEY_URL)
         .header("User-Agent", USER_AGENT)
@@ -110,7 +146,38 @@ pub async fn check_logged_in(jar: &CookieJar) -> Result<bool, String> {
         .send()
         .await
         .map_err(|e| format!("Couldn't reach Woolworths: {e}"))?;
-    Ok(response.status().is_success())
+
+    let status = response.status();
+    if let Some(logged_in) = login_outcome(status) {
+        return Ok(logged_in);
+    }
+    Err(format!(
+        "Signed in, but Woolworths wouldn't return the trolley: {}. Signing in again won't help — this isn't a sign-in problem. {}",
+        status,
+        describe_response(response).await
+    ))
+}
+
+/// Final URL (after any redirects) plus a truncated body — the useful
+/// half of a failed response, which the code used to throw away
+/// entirely, leaving a bare status code as the only clue.
+async fn describe_response(response: reqwest::Response) -> String {
+    let url = response.url().to_string();
+    let location = response
+        .headers()
+        .get(reqwest::header::LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .map(|l| format!(" Redirected to {l}."))
+        .unwrap_or_default();
+    let body = response.text().await.unwrap_or_default();
+    let body = body.trim();
+    let snippet: String = body.chars().take(400).collect();
+    if snippet.is_empty() {
+        format!("(no response body; URL {url}).{location}")
+    } else {
+        let ellipsis = if body.chars().count() > 400 { "…" } else { "" };
+        format!("Response from {url}:{location} {snippet}{ellipsis}")
+    }
 }
 
 async fn add_item_to_trolley(
@@ -144,8 +211,13 @@ async fn add_item_to_trolley(
         .await
         .map_err(|e| format!("Request failed: {e}"))?;
 
-    if !response.status().is_success() {
-        return Err(format!("Woolworths returned {}", response.status()));
+    let status = response.status();
+    if !status.is_success() {
+        // Body included deliberately: a bare "Woolworths returned 404"
+        // (what this used to say) gives nothing to act on. Whatever the
+        // API says about *why* — an unknown sku, no fulfilment context,
+        // an expired session — is in the body, and was being discarded.
+        return Err(format!("Woolworths returned {status}. {}", describe_response(response).await));
     }
 
     let body: serde_json::Value = response
@@ -177,7 +249,7 @@ pub async fn add_all(jar: CookieJar, items: Vec<CartLineInput>) -> Result<CartAd
         );
     }
 
-    let client = reqwest::Client::new();
+    let client = api_client()?;
     let mut results = Vec::with_capacity(items.len());
     for item in items {
         let outcome =
@@ -193,4 +265,29 @@ pub async fn add_all(jar: CookieJar, items: Vec<CartLineInput>) -> Result<CartAd
     }
 
     Ok(CartAddSummary { results })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::StatusCode;
+
+    /// The reported bug: a 404 from the trolley endpoint was treated as
+    /// "not signed in", so signing in (successfully) never cleared the
+    /// prompt. Only a real auth rejection may answer `false`.
+    #[test]
+    fn only_auth_failures_mean_signed_out() {
+        assert_eq!(login_outcome(StatusCode::OK), Some(true));
+        assert_eq!(login_outcome(StatusCode::NO_CONTENT), Some(true));
+
+        assert_eq!(login_outcome(StatusCode::UNAUTHORIZED), Some(false));
+        assert_eq!(login_outcome(StatusCode::FORBIDDEN), Some(false));
+
+        // Everything else is a different problem entirely — surfaced as
+        // an error, never as "go sign in again".
+        assert_eq!(login_outcome(StatusCode::NOT_FOUND), None);
+        assert_eq!(login_outcome(StatusCode::INTERNAL_SERVER_ERROR), None);
+        assert_eq!(login_outcome(StatusCode::FOUND), None);
+        assert_eq!(login_outcome(StatusCode::TOO_MANY_REQUESTS), None);
+    }
 }
