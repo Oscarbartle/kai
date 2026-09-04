@@ -144,6 +144,14 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
     mutation with real variables passes validation and fails *only* with
     `"The operation 'setCartLineItemQuantity' is banned for cart type
     'GuestCart'"` — shape correct, auth the only difference.
+  - **The cart page URL moved too**: `/reviewtrolley` now returns a real
+    404 (that's the page the app opened after a successful add). It's
+    `/cart` now — read off the cart control on their own site. Telling a
+    live route from a dead one needs care since their SPA answers 200 for
+    almost anything; the tell is that `/cart` redirects a signed-out
+    visitor to Auth0 login (what a real cart page does) while
+    `/reviewtrolley`, `/trolley`, `/shop/cart` and `/basket` all answer an
+    actual 404.
   - **Product lookup is a separate REST API and is unaffected** —
     `/api/v1/products/{sku}` still returns 200, so Pantry, SKU add and
     price refresh keep working. Only the cart features broke.

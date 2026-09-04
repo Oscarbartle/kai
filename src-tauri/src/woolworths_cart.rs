@@ -53,11 +53,18 @@ const TROLLEY_URL: &str = "https://www.woolworths.co.nz/api/v1/trolleys/my";
 /// Where Woolworths' own site now sends its cart traffic (confirmed by
 /// watching woolworths.co.nz: `POST /api/graphql?op-name=CustomerCart`).
 const GRAPHQL_URL: &str = "https://www.woolworths.co.nz/api/graphql";
-/// The user-facing cart page — confirmed by following the cart link on
-/// woolworths.co.nz itself. (`/trolley` is a 404; `/reviewtrolley`
-/// redirects to Auth0 login when logged out, which is the expected
-/// behavior for a cart page.)
-pub const CART_PAGE_URL: &str = "https://www.woolworths.co.nz/reviewtrolley";
+/// The user-facing cart page — read off the cart control on
+/// woolworths.co.nz itself (its link is `/cart`), not guessed.
+///
+/// Was `/reviewtrolley`, which went dead in the same restructure that
+/// retired the REST cart API: it now returns a real 404, which is what
+/// the app was opening after a successful add. Distinguishing a live
+/// route from a dead one needs care here, because their SPA answers 200
+/// for almost anything — the tell is that `/cart` redirects a signed-out
+/// visitor to Auth0 login (what a real cart page does), while
+/// `/reviewtrolley`, `/trolley`, `/shop/cart` and `/basket` all answer
+/// an actual 404.
+pub const CART_PAGE_URL: &str = "https://www.woolworths.co.nz/cart";
 const USER_AGENT: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
 
