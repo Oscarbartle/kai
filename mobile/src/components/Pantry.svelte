@@ -103,17 +103,17 @@
     position: sticky;
     top: calc(var(--bar-h) + env(safe-area-inset-top));
     z-index: 4;
-    padding: 0.75rem 1rem 0.5rem;
+    padding: 0.9rem 1rem 0.6rem;
     background: var(--bg);
   }
 
   input[type='search'] {
     width: 100%;
-    padding: 0.7rem 0.9rem;
-    border-radius: 10px;
+    padding: 0.9rem 1rem;
+    border-radius: 0.8rem;
     border: 1px solid var(--line);
     background: var(--card);
-    font-size: 1rem;
+    font-size: 1.05rem;
   }
 
   input[type='search']:focus {
@@ -125,10 +125,10 @@
      can have a dozen tags and wrapped chips would eat the screen. */
   .chips {
     display: flex;
-    gap: 0.5rem;
-    margin-top: 0.6rem;
+    gap: 0.6rem;
+    margin-top: 0.75rem;
     overflow-x: auto;
-    padding-bottom: 0.25rem;
+    padding-bottom: 0.3rem;
     scrollbar-width: none;
   }
 
@@ -138,12 +138,12 @@
 
   .chip {
     flex: 0 0 auto;
-    padding: 0.4rem 0.85rem;
+    padding: 0.55rem 1.1rem;
     border-radius: 999px;
     border: 1px solid var(--line);
     background: var(--card);
     color: var(--muted);
-    font-size: 0.85rem;
+    font-size: 0.95rem;
     font-weight: 600;
   }
 
@@ -156,25 +156,27 @@
   .list {
     list-style: none;
     margin: 0;
-    padding: 0.25rem 1rem 1rem;
+    padding: 0.35rem 1rem 1.25rem;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.65rem;
   }
 
+  /* Generous rows: a pantry is dozens of items, but on a phone each one
+     should be comfortably readable and tappable, not a thin strip. */
   .row {
     display: flex;
     align-items: center;
-    gap: 0.85rem;
-    padding: 0.65rem 0.85rem;
+    gap: 1rem;
+    padding: 0.85rem 1rem;
     background: var(--card);
-    border-radius: 12px;
+    border-radius: 1rem;
   }
 
   .thumb {
     flex: 0 0 auto;
-    width: 3rem;
-    height: 3rem;
+    width: 3.8rem;
+    height: 3.8rem;
     border-radius: 50%;
     overflow: hidden;
   }
@@ -184,17 +186,18 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.15rem;
+    gap: 0.2rem;
   }
 
   .name {
     font-weight: 700;
+    font-size: 1.1rem;
     overflow-wrap: anywhere;
   }
 
   .tags {
     color: var(--muted);
-    font-size: 0.78rem;
+    font-size: 0.85rem;
   }
 
   .price {
@@ -208,7 +211,7 @@
   .now {
     color: var(--price);
     font-weight: 700;
-    font-size: 1.05rem;
+    font-size: 1.2rem;
   }
 
   .now.special {
@@ -217,18 +220,19 @@
 
   .was {
     color: var(--error);
-    font-size: 0.75rem;
+    font-size: 0.82rem;
     text-decoration: line-through;
   }
 
   .na {
     color: var(--muted);
-    font-size: 0.85rem;
+    font-size: 0.95rem;
   }
 
   .empty {
     margin: 2rem 1rem;
     text-align: center;
     color: var(--muted);
+    font-size: 1rem;
   }
 </style>

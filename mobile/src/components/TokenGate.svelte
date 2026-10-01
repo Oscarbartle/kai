@@ -36,7 +36,7 @@
 </script>
 
 <main class="gate">
-  <img class="logo" src="/icons/icon-192.png" alt="" width="72" height="72" />
+  <img class="logo" src="/icons/icon-192.png" alt="" />
   <h1>Kai</h1>
   <p class="lead">Enter your shared token to connect.</p>
 
@@ -77,7 +77,9 @@
   }
 
   .logo {
-    border-radius: 16px;
+    width: 4.5rem;
+    height: 4.5rem;
+    border-radius: 1rem;
   }
 
   h1 {
@@ -100,8 +102,8 @@
 
   input {
     width: 100%;
-    padding: 0.85rem 1rem;
-    border-radius: 10px;
+    padding: 0.95rem 1.1rem;
+    border-radius: 0.7rem;
     border: 1px solid var(--line);
     background: var(--card);
     font-size: 1rem;
@@ -113,9 +115,9 @@
   }
 
   button {
-    padding: 0.85rem 1rem;
+    padding: 0.95rem 1.1rem;
     border: none;
-    border-radius: 10px;
+    border-radius: 0.7rem;
     background: var(--accent);
     font-weight: 700;
     font-size: 1rem;

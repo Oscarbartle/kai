@@ -103,8 +103,8 @@
   <header class="topbar">
     <h1>{tab === 'pantry' ? 'Pantry' : 'Recipe Book'}</h1>
     <div class="actions">
-      <button class="icon" onclick={load} disabled={loading} aria-label="Refresh">
-        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" class:spin={loading}>
+      <button class="icon-btn" onclick={load} disabled={loading} aria-label="Refresh">
+        <svg viewBox="0 0 24 24" class="icon" aria-hidden="true" class:spin={loading}>
           <path
             d="M20 12a8 8 0 1 1-2.5-5.8M20 4v5h-5"
             fill="none"
@@ -115,8 +115,8 @@
           />
         </svg>
       </button>
-      <button class="icon" onclick={() => signOut()} aria-label="Sign out">
-        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+      <button class="icon-btn" onclick={() => signOut()} aria-label="Sign out">
+        <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
           <path
             d="M9 4H5v16h4M16 8l4 4-4 4M20 12H9"
             fill="none"
@@ -147,7 +147,7 @@
 
   <nav class="tabs" aria-label="Sections">
     <a href="#/pantry" class:active={tab === 'pantry'} aria-current={tab === 'pantry' ? 'page' : undefined}>
-      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+      <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
         <path
           d="M4 9h16l-1.5 11h-13zM8 9V6a4 4 0 0 1 8 0v3"
           fill="none"
@@ -160,7 +160,7 @@
       Pantry
     </a>
     <a href="#/recipes" class:active={tab === 'recipes'} aria-current={tab === 'recipes' ? 'page' : undefined}>
-      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+      <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
         <path
           d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 19V5M9 8h6"
           fill="none"
@@ -191,16 +191,16 @@
 
   h1 {
     margin: 0;
-    font-size: 1.2rem;
+    font-size: 1.4rem;
   }
 
   .actions {
     display: flex;
   }
 
-  .icon {
-    width: 2.75rem;
-    height: 2.75rem;
+  .icon-btn {
+    width: 3.1rem;
+    height: 3.1rem;
     display: grid;
     place-items: center;
     border: none;
@@ -209,7 +209,7 @@
     color: #ccc;
   }
 
-  .icon:disabled {
+  .icon-btn:disabled {
     opacity: 0.6;
     cursor: default;
   }
@@ -248,9 +248,9 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.15rem;
+    gap: 0.2rem;
     color: var(--muted);
-    font-size: 0.72rem;
+    font-size: 0.8rem;
     font-weight: 700;
     text-decoration: none;
   }
@@ -270,9 +270,10 @@
   }
 
   .retry {
-    padding: 0.7rem 1.4rem;
+    padding: 0.85rem 1.6rem;
     border: none;
-    border-radius: 10px;
+    border-radius: 0.7rem;
+    font-size: 1rem;
     background: var(--accent);
     color: var(--text);
     font-weight: 700;

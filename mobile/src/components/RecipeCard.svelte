@@ -24,7 +24,7 @@
   <div class="hero" class:no-image={!recipe.image_url}>
     <Picture src={recipe.image_url} label={recipe.name} />
     <button class="back" onclick={onback} aria-label="Back to recipes">
-      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+      <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
         <path
           d="M15 5l-7 7 7 7"
           fill="none"
@@ -115,8 +115,8 @@
     position: absolute;
     top: calc(0.75rem + env(safe-area-inset-top));
     left: 0.75rem;
-    width: 2.6rem;
-    height: 2.6rem;
+    width: 2.9rem;
+    height: 2.9rem;
     display: grid;
     place-items: center;
     border: none;
@@ -139,7 +139,7 @@
 
   h1 {
     margin: 0 0 0.75rem;
-    font-size: 1.65rem;
+    font-size: 1.85rem;
     line-height: 1.2;
     overflow-wrap: anywhere;
   }
@@ -155,7 +155,7 @@
     border-radius: 999px;
     background: var(--card-2);
     color: #ccc;
-    font-size: 0.82rem;
+    font-size: 0.92rem;
     font-weight: 600;
     text-decoration: none;
   }
@@ -177,7 +177,7 @@
     border-radius: 999px;
     border: 1px solid var(--accent);
     color: #b9c6cf;
-    font-size: 0.75rem;
+    font-size: 0.85rem;
     font-weight: 700;
   }
 
@@ -187,7 +187,7 @@
 
   h2 {
     margin: 0 0 0.6rem;
-    font-size: 0.8rem;
+    font-size: 0.9rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--muted);
@@ -210,6 +210,7 @@
      one tidy edge however long "3½ tbsp" or "125 mL" gets. */
   .ingredients li {
     display: grid;
+    font-size: 1.05rem;
     grid-template-columns: 5.5rem 1fr;
     align-items: baseline;
     gap: 0.9rem;
@@ -250,7 +251,8 @@
   .steps li {
     counter-increment: step;
     position: relative;
-    padding-left: 2.6rem;
+    padding-left: 2.8rem;
+    font-size: 1.05rem;
     line-height: 1.65;
     overflow-wrap: anywhere;
   }
@@ -260,8 +262,8 @@
     position: absolute;
     left: 0;
     top: 0.1rem;
-    width: 1.8rem;
-    height: 1.8rem;
+    width: 1.9rem;
+    height: 1.9rem;
     display: grid;
     place-items: center;
     border-radius: 50%;

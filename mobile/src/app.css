@@ -13,8 +13,8 @@
   --price: #95977e;
   --good: #5f9b46;
   --error: #ff8a80;
-  --bar-h: 3.25rem;
-  --nav-h: 3.5rem;
+  --bar-h: 3.5rem;
+  --nav-h: 4.1rem;
   font-family:
     -apple-system, 'Segoe UI Variable', 'Segoe UI', system-ui, Roboto, sans-serif;
 }
@@ -24,7 +24,20 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-html,
+/* The whole UI is sized in rem, and rem scales with the screen's width — so
+   it looks the same proportion of the screen on every phone. This is here
+   because a fixed-size layout assumes the browser reports a ~400px-wide
+   screen, and not every phone does: one real phone laid the page out at
+   ~1000 CSS px (a Chrome zoom / display-size setting), which shrank a
+   fixed-size UI to a third of its intended size — a "million items on
+   screen". `1rem` as the floor keeps the user's own text-size preference
+   as the minimum; the cap stops a laptop window getting absurd. */
+html {
+  font-size: clamp(1rem, 4.7vw, 3rem);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -51,4 +64,12 @@ a {
 
 img {
   display: block;
+}
+
+/* Icons are sized in rem too (a fixed pixel size wouldn't scale with the
+   rest of the UI). */
+svg.icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: 0 0 auto;
 }
