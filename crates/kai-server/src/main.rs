@@ -20,7 +20,14 @@ async fn main() {
     kai_server::run_migrations(&database_url).await;
 
     let pool: Pool = kai_server::build_pool(&database_url);
-    let app = kai_server::routes::build(AppState { pool }, shared_token);
+    let mut app = kai_server::routes::build(AppState { pool }, shared_token);
+
+    // Optional: serve the built mobile web app from this folder (the
+    // Docker image sets it). Unset = API only, exactly as before.
+    if let Ok(dir) = std::env::var("KAI_STATIC_DIR") {
+        println!("serving the mobile web app from {dir}");
+        app = kai_server::routes::with_static_files(app, dir);
+    }
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await

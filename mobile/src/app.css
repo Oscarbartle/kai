@@ -1,0 +1,54 @@
+/* Same dark palette as the desktop app (see src/routes/app/*.svelte), so the
+   two read as one product. */
+:root {
+  color-scheme: dark;
+  --bg: #1e1e1d;
+  --bar: #171716;
+  --card: #232322;
+  --card-2: #2c2c2b;
+  --line: #333;
+  --text: #fff;
+  --muted: #999;
+  --accent: #3a4a55;
+  --price: #95977e;
+  --good: #5f9b46;
+  --error: #ff8a80;
+  --bar-h: 3.25rem;
+  --nav-h: 3.5rem;
+  font-family:
+    -apple-system, 'Segoe UI Variable', 'Segoe UI', system-ui, Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  min-height: 100dvh;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+}
+
+img {
+  display: block;
+}
