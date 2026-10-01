@@ -57,9 +57,10 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
   Windows machine or CI (can't cross-compile from macOS). Android is possible
   later via Tauri 2.0 mobile support but needs its own init + touch UI work —
   not started.
-- **Future idea (not started)**: a second, separate stripped-down companion
-  app (e.g. mobile) living in the same repo as `apps/desktop` + `apps/mobile`,
-  sharing one backend/API, each with its own `src-tauri`.
+- **Phone companion — in progress** (was a "future idea" for a second
+  Tauri app under `apps/mobile`). Became a small installable web app in
+  `mobile/`, served by `kai-server` itself — see "Mobile web app" below
+  for why that beat a second Tauri app.
 - **Auto-update — implemented.** `tauri-plugin-updater` + `tauri-plugin-process`,
   wired into a new "Updates" section in `Settings.svelte`: checks
   silently on open, shows a version/notes + "Install & restart" button
@@ -107,8 +108,8 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
   `provider` column for this.
 - **Remote mode**: an API service on the Unraid box backed by Postgres —
   mirroring the old v1 `kai/server/` pattern — with the desktop client
-  talking to it over HTTP instead of a direct Postgres connection. In
-  progress — see "Phase B: shared remote database" below.
+  talking to it over HTTP instead of a direct Postgres connection. Done
+  and deployed — see "Phase B: shared remote database" below.
 - **Woolworths migrated their cart to GraphQL (2026-08-31) — REST cart
   API retired.** Symptom was an inescapable loop: sign in successfully,
   app still says "not signed in", cart-add 404s. Root cause is upstream,
@@ -161,7 +162,12 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
     "Not signed in" alone couldn't distinguish "wrong cookies" from
     "endpoint retired", which need opposite fixes.
 
-- **Woolworths cart interaction — implemented** (`src-tauri/src/woolworths_cart.rs`,
+- **Woolworths cart interaction — implemented** *(partly superseded: the
+  GraphQL migration note above replaces the retired REST cart API this
+  section describes — the cart-add request, the login-check request and
+  the `/reviewtrolley` URL below are all out of date. The app-hosted login
+  window, the cookie reading, and the merge-before-round / multi-list
+  logic still hold.)* (`src-tauri/src/woolworths_cart.rs`,
   originally wired to a plain "Log in to Woolworths" + "Add all to
   Woolworths cart" button pair on the old flat `/shopping-list` page,
   now `Settings.svelte`'s account section + `CartAdd.svelte` in `/app` —
@@ -678,7 +684,7 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
   sequential across items too, not `Promise.all`, to avoid a burst of
   simultaneous requests to Woolworths.
 
-## Phase B: shared remote database — in progress
+## Phase B: shared remote database — done
 
 - **Goal**: genuine shared multi-user use (Oscar + partner), not backup —
   local and remote are fully separate datastores, no migration/merge
@@ -847,10 +853,161 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
     until a subsequent `set_remote_config` call — with an actual URL —
     succeeds). Caught by re-reading the two commands' error paths after
     writing the UI around them, not by a test.
-- **Stage 6 (not started)**: real deployment — `docker compose up -d` on
-  the actual Unraid box, reachable through the real Cloudflare Tunnel URL,
-  desktop app pointed at it end-to-end from a second device if possible
-  (the actual multi-user proof).
+- **Stage 6 — done. Deployed to the Unraid box.** `docker compose up -d
+  --build` from `crates/kai-server` (repo at `/mnt/user/appdata/kai/repo`,
+  branch `v2`), reachable through the Cloudflare Tunnel at
+  `https://kai.oserver.pro`, with the desktop app connected via Settings →
+  Remote server. Redeploying is `git pull && docker compose up -d --build`
+  (a warm-cache rebuild took about a minute). What the real deploy
+  surfaced, none of which a test could have:
+  - The first-ever `initdb` took ~57s on that disk (its own fsync alone
+    ~28s), past the compose healthcheck's 50s retry budget, so `kai-server`
+    gave up waiting on a Postgres seconds from healthy. Fixed with
+    `start_period: 60s` on the Postgres healthcheck.
+  - `smoke-test.sh` had lost its executable bit (committed from Windows)
+    and had an apostrophe inside a `${TOKEN:?…}` message — bash treats a
+    quote inside a `${var:?word}` as a quote opener even within double
+    quotes, and the error pointed at line 27, nowhere near line 12.
+  - **Cloudflare Access (Zero Trust) was intercepting the hostname** with
+    an interactive SSO login before requests reached the origin. A
+    bearer-token API client can't complete that; from outside it showed as
+    a 302 to `*.cloudflareaccess.com`. Fixed by taking the hostname out of
+    the Access policy (kai-server's own shared-token auth already gates
+    every route).
+  - Verified from a different network than the LAN: `/health` 200 without
+    a token, `/items` 401 without one and 200 with, a real create + delete
+    round trip.
+  - Old v1 data (JSON files from the v1 server's `/data` bind mount) was
+    migrated in once with throwaway scripts that aren't kept in the repo;
+    a tarball of the original JSON is on the Unraid box under
+    `/mnt/user/appdata/kai/backups/`. Items and recipes re-fetched SKU data
+    live from Woolworths rather than copying v1's stale prices. v1's
+    per-ingredient `nominal` flag has no equivalent here, so nominal g/mL
+    amounts were roughly converted to tsp/tbsp (1 tsp ≈ 5, 1 tbsp ≈ 15) and
+    nominal `ea` (count) ones — which can't be converted — were left as
+    `count` for hand-fixing.
+
+## Mobile web app (`mobile/`) — in progress
+
+- **Goal**: a limited phone version (Android first): view the pantry, view
+  the recipe book with a nicely formatted recipe card, and add items to
+  shopping lists — all against the same `kai-server` the desktop uses.
+  Remote-only: no local mode, and no Woolworths cart (that needs the
+  desktop app's own login webview).
+- **Decided: an installable web app (PWA), not Tauri Android.**
+  - Oscar's partner isn't technical: with a PWA she opens a URL once,
+    taps Install, and updates arrive the next time she opens it. Tauri
+    Android would mean sideloading an APK per update
+    (`tauri-plugin-updater` is desktop-only), a signing keystore with the
+    same no-recovery property as the updater key, an Android SDK/NDK
+    toolchain that isn't set up on this machine (checked: no
+    `ANDROID_HOME`, `adb`, NDK or Rust Android targets), and a CI job.
+  - UI reuse would have been small either way: the desktop UI is
+    desktop-only (zero `@media` queries, fixed-width sidebars) and every
+    call is a Tauri `invoke`, so a phone UI is new work regardless.
+  - Escape hatch: if Android-only capabilities are ever needed, wrap the
+    same UI in Tauri then.
+- **Hosted by `kai-server` itself**, at the site root of the same address
+  as the API (`https://kai.oserver.pro/`). Same address = same origin, so
+  there's no CORS to configure and the app's calls are plain relative
+  paths (`/pantry`). Considered and not chosen: hosting the static files
+  elsewhere (e.g. Cloudflare Pages) — would need a CORS layer and a
+  configured API address, in exchange for shipping UI changes without
+  rebuilding the server image.
+  - `routes::with_static_files(router, dir)` serves a folder through
+    tower-http's `ServeDir`, **outside** the token check — the bundle
+    holds no secrets and has to load before anyone can type a token into
+    it — while every API route stays behind `require_token`. Enabled by
+    the `KAI_STATIC_DIR` env var (the Docker image sets it); unset = API
+    only, exactly as before.
+  - **No SPA catch-all, on purpose**: an unknown path 404s rather than
+    returning `index.html` with a 200, which would turn a mistyped API
+    route into an HTML page a JSON client chokes on.
+  - `Cache-Control: no-cache` on the static files (revalidate every
+    time, a cheap 304 when unchanged) so a redeploy reaches phones on
+    their next open instead of when a heuristic cache expires.
+- **Two bulk read endpoints**, added because the per-resource routes would
+  make a phone do ~`2 × items` requests to draw the pantry (180 for 90
+  items) over mobile data and a tunnel: `GET /pantry` (every item with its
+  SKUs and tags — the desktop's `ItemCard` shape) and `GET /recipe-book`
+  (every recipe with tags *and ingredients*, so a recipe card opens with no
+  second request). Composed from the existing `db::*` functions, no new
+  SQL; the same N+1 still happens, but against a database on the same box.
+  Also what makes an offline cache cheap later: each screen is one JSON
+  document. (`routes/overview.rs`.)
+- **Stack**: Vite + Svelte 5 + TypeScript, no SvelteKit, no router library
+  (the URL hash is the route, so the phone's own Back button closes a
+  recipe card). Same dark palette as the desktop. The shared token is
+  checked against `/status` before it's saved and stored in
+  `localStorage`; a token the server later rejects drops back to the token
+  screen with an explanation rather than showing an empty app.
+- **Step 1 — done: read-only Pantry and Recipe Book.** Pantry: search, tag
+  filter (several tags narrow the list, like the desktop sidebar),
+  alphabetical, image + cheapest price with the was-price on a special.
+  Recipe Book: compact list, then a recipe card (full-bleed photo,
+  servings/ingredient-count/source pills, ingredients with quantities in
+  their own aligned column, method as numbered steps).
+  - Display rules worth knowing: quantities show fractions (`½`, `1½ tsp`,
+    not `0.5`); a `count` ingredient shows just the number; an ingredient
+    with no amount shows no quantity. **The method's numbering is inferred
+    from line breaks** — it's freeform text, usually written one step per
+    line, so lines become numbered steps (any `1.`/`2)` the author typed is
+    stripped so it doesn't read "1. 1. Mix…"); a single line stays a
+    paragraph. A source link is only clickable if it's really `http(s)`.
+    The recipe list is newest-first, same as the desktop (not alphabetical
+    like the items list).
+  - `Picture.svelte` shows a letter tile while a photo loads, and keeps it
+    if the photo fails: on mobile data product photos arrive one by one,
+    and without this each was a blank white disc until its turn (seen in
+    the first screenshot, then fixed).
+- **How it was verified, and what wasn't.**
+  - `crates/kai-server/tests/thin_client.rs`: against a real embedded
+    Postgres and socket, the app loads with no token, the API is still 401
+    without one, an unknown path 404s, `/pantry` and `/recipe-book` return
+    the right shapes (including case-insensitive alphabetical order).
+  - The UI was exercised in a phone-sized browser against a seeded
+    throwaway server — `cargo run -p kai-server --example dev_server`
+    (embedded Postgres + seed data + the built app on `127.0.0.1:8799`,
+    test token defined in the example; nothing real is touched). The seed
+    deliberately includes edge cases: an image that won't load, an item
+    with no SKU, a special, a long name, a recipe with no image/servings/
+    method, fractional tsp/tbsp, numbered and un-numbered methods, and a
+    non-web source link. Checked: wrong token rejected and *not* saved;
+    stale saved token handled; tag filter + search; case-insensitive
+    match; empty states; list → card → back; junk source link not
+    rendered as a link.
+  - **Not verified**: the Docker build (no Docker in the dev sandbox — I
+    reproduced the web stage's steps from a clean copy, `npm ci` then
+    build, and the output was byte-identical to the tested build, and
+    confirmed the lockfile carries the Linux native binaries `npm ci` needs
+    in the image, but the image itself hasn't been built); anything on a
+    real phone (installability, safe-area insets, touch feel); the
+    deployed path through the tunnel.
+  - Screenshot tooling gotcha: in the emulated phone viewport, captures
+    taken *after scrolling* came back stale/tiled even though the DOM was
+    correct (checked via `scrollY` and element geometry). A tall viewport
+    (375×1500) shows a whole card without scrolling and captured reliably.
+- **Still to do** (in this order, one at a time):
+  2. Shopping lists: view them, and add items by **tapping "+ Add to
+     list"** rather than drag and drop. The desktop's sidebar + drop zone
+     doesn't fit ~390px, and HTML5 drag events are unreliable on touch —
+     *not tested on a device*, so that's a reason not to build the
+     feature's core on it, not a claim that it can't work. Same endpoint,
+     so the merge and duplicate rules stay identical. Needs CORS-free
+     write routes added to the dev proxy list in `mobile/vite.config.ts`.
+  3. Offline: a service worker caching the last-seen pantry/recipes/lists
+     for *reading* (grocery stores have bad signal); queued offline writes
+     deliberately not planned. This is also where real installability gets
+     properly checked on a device — step 1 ships a manifest and icons but
+     no service worker.
+- **Gotcha that nearly shipped**: `.dockerignore`'s bare `node_modules`
+  only matches at the context root, not `mobile/node_modules`, so the
+  Windows `node_modules` would have been copied into the Linux build and
+  overwritten its install with the wrong native binaries. It's
+  `**/node_modules` now, plus `mobile/dist`.
+- **Security note**: the shared token will live in one more browser. A
+  lost phone means rotating `KAI_SHARED_TOKEN` in the Unraid `.env`, which
+  also signs the desktop apps out until the new one is entered.
 
 ## Other reference
 
