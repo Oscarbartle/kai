@@ -52,3 +52,28 @@ export interface RecipeBookEntry {
   tags: Tag[];
   ingredients: Ingredient[];
 }
+
+export interface ShoppingList {
+  id: number;
+  name: string;
+}
+
+export interface ShoppingLine {
+  id: number;
+  item_id: number;
+  item_name: string;
+  amount: number | null;
+  unit: string | null;
+  /** Which recipe this line came from, if any. */
+  source_recipe_id: number | null;
+}
+
+export interface ShoppingEntry {
+  list: ShoppingList;
+  lines: ShoppingLine[];
+}
+
+/** What the add-to-list sheet is adding. */
+export type AddTarget =
+  | { kind: 'item'; itemId: number; name: string }
+  | { kind: 'recipe'; recipeId: number; name: string; servings: number | null };

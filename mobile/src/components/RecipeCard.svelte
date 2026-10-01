@@ -7,7 +7,7 @@
   import { formatQuantity, methodSteps } from '../lib/format';
   import Picture from './Picture.svelte';
 
-  let { entry, onback }: { entry: RecipeBookEntry; onback: () => void } = $props();
+  let { entry, onback, onadd }: { entry: RecipeBookEntry; onback: () => void; onadd: () => void } = $props();
 
   const recipe = $derived(entry.recipe);
   const steps = $derived(methodSteps(recipe.method));
@@ -34,6 +34,11 @@
           stroke-linejoin="round"
         />
       </svg>
+    </button>
+    <button class="back add" onclick={onadd} aria-label="Add to a shopping list">
+      <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+    </svg>
     </button>
   </div>
 
@@ -124,6 +129,11 @@
     background: rgba(23, 23, 22, 0.72);
     color: #fff;
     backdrop-filter: blur(6px);
+  }
+
+  .add {
+    left: auto;
+    right: 0.75rem;
   }
 
   /* The sheet overlaps the bottom of the photo with rounded top corners,

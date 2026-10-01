@@ -8,7 +8,7 @@
   import { cheapestSku, itemImage, money } from '../lib/format';
   import Picture from './Picture.svelte';
 
-  let { entries }: { entries: PantryEntry[] } = $props();
+  let { entries, onadd }: { entries: PantryEntry[]; onadd: (entry: PantryEntry) => void } = $props();
 
   let search = $state('');
   let activeTags = $state<Set<number>>(new Set());
@@ -80,19 +80,24 @@
           {#if entry.tags.length}
             <span class="tags">{entry.tags.map((t) => t.name).join(' · ')}</span>
           {/if}
-        </div>
-        <div class="price">
-          {#if best === null || best.price.sale_price == null}
-            <span class="na">N/A</span>
-          {:else}
-            {#if best.price.is_special && best.price.original_price != null}
-              <span class="was">{money(best.price.original_price)}</span>
+          <div class="price">
+            {#if best === null || best.price.sale_price == null}
+              <span class="na">N/A</span>
+            {:else}
+              <span class="now" class:special={best.price.is_special}>
+                {money(best.price.sale_price)}
+              </span>
+              {#if best.price.is_special && best.price.original_price != null}
+                <span class="was">{money(best.price.original_price)}</span>
+              {/if}
             {/if}
-            <span class="now" class:special={best.price.is_special}>
-              {money(best.price.sale_price)}
-            </span>
-          {/if}
+          </div>
         </div>
+        <button class="add" aria-label={`Add ${entry.item.name} to a shopping list`} onclick={() => onadd(entry)}>
+          <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+          </svg>
+        </button>
       </li>
     {/each}
   </ul>
@@ -192,7 +197,7 @@
   .name {
     font-weight: 700;
     font-size: 1.1rem;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .tags {
@@ -201,10 +206,10 @@
   }
 
   .price {
-    flex: 0 0 auto;
     display: flex;
-    flex-direction: column;
-    align-items: flex-end;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-top: 0.1rem;
     font-variant-numeric: tabular-nums;
   }
 
@@ -222,6 +227,22 @@
     color: var(--error);
     font-size: 0.82rem;
     text-decoration: line-through;
+  }
+
+  .add {
+    flex: 0 0 auto;
+    width: 2.9rem;
+    height: 2.9rem;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--text);
+  }
+
+  .add:active {
+    background: var(--good);
   }
 
   .na {

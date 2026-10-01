@@ -44,6 +44,11 @@ async fn static_app_and_bulk_endpoints() {
     kai_server::db::recipe_items::set_quantity(&client, soup.id, onion.id, Some(2.0), Some("count"))
         .await
         .unwrap();
+    let weekly = kai_server::db::shopping_lists::create(&client, "Weekly").await.unwrap();
+    kai_server::db::shopping_lists::create(&client, "Empty").await.unwrap();
+    kai_server::db::shopping_list_items::add_item(&client, weekly.id, onion.id, Some(3.0), Some("count"), None)
+        .await
+        .unwrap();
     drop(client);
 
     let token = "test-shared-token";
@@ -77,6 +82,7 @@ async fn static_app_and_bulk_endpoints() {
     assert_eq!(http.get(format!("{base}/items")).send().await.unwrap().status(), 401);
     assert_eq!(http.get(format!("{base}/pantry")).send().await.unwrap().status(), 401);
     assert_eq!(http.get(format!("{base}/recipe-book")).send().await.unwrap().status(), 401);
+    assert_eq!(http.get(format!("{base}/shopping")).send().await.unwrap().status(), 401);
 
     // --- An unknown path is a 404, not index.html with a 200 ---
     assert_eq!(http.get(format!("{base}/definitely-not-a-thing")).send().await.unwrap().status(), 404);
@@ -118,6 +124,26 @@ async fn static_app_and_bulk_endpoints() {
     assert_eq!(recipes[0]["ingredients"][0]["name"], "Onion");
     assert_eq!(recipes[0]["ingredients"][0]["amount"], 2.0);
     assert_eq!(recipes[0]["ingredients"][0]["unit"], "count");
+
+    // --- /shopping: every list with its lines, in one request ---
+    let shopping: Value = http
+        .get(format!("{base}/shopping"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let lists = shopping.as_array().expect("shopping is an array");
+    assert_eq!(lists.len(), 2);
+    let weekly_entry = lists.iter().find(|l| l["list"]["name"] == "Weekly").expect("Weekly list");
+    assert_eq!(weekly_entry["list"]["id"], weekly.id);
+    assert_eq!(weekly_entry["lines"][0]["item_name"], "Onion");
+    assert_eq!(weekly_entry["lines"][0]["amount"], 3.0);
+    assert_eq!(weekly_entry["lines"][0]["unit"], "count");
+    let empty_entry = lists.iter().find(|l| l["list"]["name"] == "Empty").expect("Empty list");
+    assert!(empty_entry["lines"].as_array().unwrap().is_empty());
 
     std::fs::remove_dir_all(&dir).ok();
     postgresql.stop().await.ok();

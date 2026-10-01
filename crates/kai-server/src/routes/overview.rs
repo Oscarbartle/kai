@@ -15,7 +15,7 @@
 //! Also what makes an offline cache cheap later: each screen's data is one
 //! JSON document.
 
-use crate::db::{items, recipe_items, recipes, skus, tags};
+use crate::db::{items, recipe_items, recipes, shopping_list_items, shopping_lists, skus, tags};
 use crate::error::AppError;
 use crate::state::AppState;
 use axum::extract::State;
@@ -24,6 +24,8 @@ use axum::{Json, Router};
 use kai_shared::items::Item;
 use kai_shared::recipe_items::RecipeIngredient;
 use kai_shared::recipes::Recipe;
+use kai_shared::shopping_list_items::ShoppingListLine;
+use kai_shared::shopping_lists::ShoppingList;
 use kai_shared::skus::StoredSku;
 use kai_shared::tags::Tag;
 use serde::Serialize;
@@ -32,6 +34,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/pantry", get(pantry))
         .route("/recipe-book", get(recipe_book))
+        .route("/shopping", get(shopping))
 }
 
 /// Everything a pantry card shows: the item, its linked SKUs (for the
@@ -72,6 +75,23 @@ async fn recipe_book(State(state): State<AppState>) -> Result<Json<Vec<RecipeBoo
         let tags = tags::list_for_recipe(&client, recipe.id).await?;
         let ingredients = recipe_items::list_for_recipe(&client, recipe.id).await?;
         out.push(RecipeBookEntry { recipe, tags, ingredients });
+    }
+    Ok(Json(out))
+}
+
+/// A shopping list with its lines, so the Lists tab draws from one request.
+#[derive(Serialize)]
+struct ShoppingEntry {
+    list: ShoppingList,
+    lines: Vec<ShoppingListLine>,
+}
+
+async fn shopping(State(state): State<AppState>) -> Result<Json<Vec<ShoppingEntry>>, AppError> {
+    let client = state.pool.get().await?;
+    let mut out = Vec::new();
+    for list in shopping_lists::list(&client).await? {
+        let lines = shopping_list_items::list_for_list(&client, list.id).await?;
+        out.push(ShoppingEntry { list, lines });
     }
     Ok(Json(out))
 }

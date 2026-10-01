@@ -887,7 +887,7 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
     nominal `ea` (count) ones — which can't be converted — were left as
     `count` for hand-fixing.
 
-## Mobile web app (`mobile/`) — in progress
+## Mobile web app (`mobile/`) — steps 1–2 done
 
 - **Goal**: a limited phone version (Android first): view the pantry, view
   the recipe book with a nicely formatted recipe card, and add items to
@@ -987,15 +987,59 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
     taken *after scrolling* came back stale/tiled even though the DOM was
     correct (checked via `scrollY` and element geometry). A tall viewport
     (375×1500) shows a whole card without scrolling and captured reliably.
-- **Still to do** (in this order, one at a time):
-  2. Shopping lists: view them, and add items by **tapping "+ Add to
-     list"** rather than drag and drop. The desktop's sidebar + drop zone
-     doesn't fit ~390px, and HTML5 drag events are unreliable on touch —
-     *not tested on a device*, so that's a reason not to build the
-     feature's core on it, not a claim that it can't work. Same endpoint,
-     so the merge and duplicate rules stay identical. Needs CORS-free
-     write routes added to the dev proxy list in `mobile/vite.config.ts`.
-  3. Offline: a service worker caching the last-seen pantry/recipes/lists
+- **UI scale — fluid rem, found on a real phone.** The first version was
+  sized in fixed `px` and looked tiny on Oscar's phone ("a million items
+  on screen"). Cause: that phone lays the page out at ~**1000 CSS px**
+  wide (a Chrome zoom/display-size setting; the viewport meta on the
+  deployed page was verified correct), so a UI built for ~400px shrank to
+  a third. Reproduced by emulating a 980px viewport, where it looked
+  identical to the phone's screenshots. Fix: `html { font-size:
+  clamp(1rem, 4.7vw, 3rem) }` and **everything sized in `rem`**, so the UI
+  is the same proportion of the screen whatever width the browser
+  reports. New components must use `rem`, not `px`.
+- **Step 2 — done: shopping lists.** A third **Lists** tab, plus a "+" on
+  every pantry row, recipe-list card and the recipe card.
+  - **"+" → sheet → confirm, never a silent add.** The sheet has a list
+    drop-down (starting on the list used last time, else the first — kept
+    in `localStorage`, only a convenience), an amount (Each/g/mL chips + a
+    stepper) for an item or a servings stepper for a recipe, and an
+    explicit Add. "New list…" in the drop-down creates one inline, so an
+    empty app isn't a dead end. Recipes go through the existing
+    `POST /shopping-lists/{id}/recipes`, so the desktop's rules apply
+    unchanged (scaled by servings; tsp/tbsp, unset amounts and
+    non-perishables skipped; merge by item + unit + source recipe).
+  - **List screen**: lines grouped — loose items first, then one group
+    per recipe (heading links to the recipe, "Remove all" for the group);
+    a stepper and a remove (✕) per line. Removing always asks first. A
+    recipe's lines can be fractional (`1¼` onions for 5 servings of a
+    4-serving recipe) — same as the desktop; the stepper then moves by
+    whole units from there.
+  - **Quantity taps are optimistic**: the number changes immediately, the
+    write follows debounced by 400ms (a run of taps is one request) via
+    `PATCH /shopping-list-items/{id}/amount`; on any failed write the
+    lists are reloaded from the server so the screen can't show something
+    unsaved. Step sizes (`shoppingLogic.ts`): count ±1, g/mL ±50, ±100 from
+    500 up; never below one step (removal is the explicit action).
+  - **Bottom sheet closes on Android Back**: `Sheet.svelte` pushes a
+    history entry while open and closes on `popstate` — one path whether
+    the user taps outside, Cancel or Back.
+  - **Third bulk endpoint**: `GET /shopping` (every list with its lines)
+    in `routes/overview.rs`; writes reuse the existing routes. Proxy paths
+    for them added to `mobile/vite.config.ts`.
+  - **Left out on purpose**: prices/totals and SKU swapping on the phone
+    (the desktop's pricing logic isn't ported), renaming/deleting lists,
+    and a recipe "×N batches" control (desktop's duplicate-block
+    semantics) — add/change quantity/remove was the ask.
+  - Verified in a phone-sized browser against the seeded dev server
+    (which now seeds a "Weekly Shop" list with a recipe's lines and an
+    empty "Costco"): stepper writes reach the server, sheet defaults and
+    Android-Back, add item, add recipe at changed servings into a newly
+    created list, keep/remove confirmations, remove-all. Pure logic is
+    unit-tested (`npm test` in `mobile/`, Node's built-in runner).
+    `thin_client.rs` also covers `/shopping`. **Not tested on a real
+    phone yet.**
+- **Still to do**:
+  - Offline: a service worker caching the last-seen pantry/recipes/lists
      for *reading* (grocery stores have bad signal); queued offline writes
      deliberately not planned. This is also where real installability gets
      properly checked on a device — step 1 ships a manifest and icons but

@@ -33,16 +33,17 @@ export function clearToken(): void {
   }
 }
 
-async function request(path: string, token: string | null): Promise<Response> {
+async function request(path: string, token: string | null, init: RequestInit = {}): Promise<Response> {
+  const headers: Record<string, string> = { ...(init.headers as Record<string, string> | undefined) };
+  if (token) headers.Authorization = `Bearer ${token}`;
   try {
-    return await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    return await fetch(path, { ...init, headers });
   } catch {
     throw new Error("Couldn't reach the server — check your connection.");
   }
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  const res = await request(path, getToken());
+async function parse<T>(res: Response): Promise<T> {
   if (res.status === 401) throw new AuthError('That token was rejected.');
   if (!res.ok) {
     let message = `The server returned ${res.status}.`;
@@ -54,7 +55,27 @@ export async function apiGet<T>(path: string): Promise<T> {
     }
     throw new Error(message);
   }
-  return (await res.json()) as T;
+  // Some writes (DELETE) answer with an empty body.
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
+}
+
+export async function apiGet<T>(path: string): Promise<T> {
+  return parse<T>(await request(path, getToken()));
+}
+
+/** POST / PATCH / DELETE with an optional JSON body. */
+export async function apiSend<T = void>(
+  method: 'POST' | 'PATCH' | 'DELETE',
+  path: string,
+  body?: unknown
+): Promise<T> {
+  const init: RequestInit = { method };
+  if (body !== undefined) {
+    init.headers = { 'Content-Type': 'application/json' };
+    init.body = JSON.stringify(body);
+  }
+  return parse<T>(await request(path, getToken(), init));
 }
 
 /** Checks a token against the server *before* it's saved. */

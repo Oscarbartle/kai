@@ -1,17 +1,28 @@
 <!--
-  The shell: token gate, then two tabs (Pantry, Recipe Book) and a recipe
-  card on top of the Recipe Book. Routing is just the URL hash, so the
+  The shell: token gate, then three tabs (Pantry, Recipe Book, Lists), a
+  recipe card on top of the Recipe Book and a list on top of Lists. Routing is just the URL hash, so the
   phone's own Back button does the obvious thing (closes a recipe card)
   without any router library.
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
   import { AuthError, apiGet, clearToken, getToken } from './lib/api';
-  import type { PantryEntry, RecipeBookEntry } from './lib/types';
+  import type { AddTarget, PantryEntry, RecipeBookEntry } from './lib/types';
+  import {
+    createList,
+    loadShopping,
+    setAuthFailedHandler,
+    shopping,
+    showToast,
+  } from './lib/shopping.svelte';
   import TokenGate from './components/TokenGate.svelte';
   import Pantry from './components/Pantry.svelte';
   import Recipes from './components/Recipes.svelte';
   import RecipeCard from './components/RecipeCard.svelte';
+  import Lists from './components/Lists.svelte';
+  import ListDetail from './components/ListDetail.svelte';
+  import AddSheet from './components/AddSheet.svelte';
+  import Sheet from './components/Sheet.svelte';
 
   let authed = $state(!!getToken());
   let authMessage: string | null = $state(null);
@@ -23,7 +34,25 @@
 
   let hash = $state(location.hash);
 
-  const tab = $derived(hash.startsWith('#/recipes') ? 'recipes' : 'pantry');
+  // What the "+" sheet is open for, and the little "new list" sheet.
+  let adding: AddTarget | null = $state(null);
+  let newListOpen = $state(false);
+  let newListName = $state('');
+  let newListBusy = $state(false);
+
+  const tab = $derived(
+    hash.startsWith('#/recipes') ? 'recipes' : hash.startsWith('#/lists') ? 'lists' : 'pantry'
+  );
+  const listId = $derived.by(() => {
+    const m = hash.match(/^#\/lists\/(\d+)/);
+    return m ? Number(m[1]) : null;
+  });
+  const openList = $derived.by(() =>
+    listId == null ? null : (shopping.entries?.find((e) => e.list.id === listId) ?? null)
+  );
+  const title = $derived(
+    tab === 'pantry' ? 'Pantry' : tab === 'recipes' ? 'Recipe Book' : 'Shopping Lists'
+  );
   const recipeId = $derived.by(() => {
     const m = hash.match(/^#\/recipes\/(\d+)/);
     return m ? Number(m[1]) : null;
@@ -43,6 +72,7 @@
       const [p, b] = await Promise.all([
         apiGet<PantryEntry[]>('/pantry'),
         apiGet<RecipeBookEntry[]>('/recipe-book'),
+        loadShopping(),
       ]);
       pantry = p;
       book = b;
@@ -60,6 +90,8 @@
     authMessage = message;
     pantry = null;
     book = null;
+    shopping.entries = null;
+    adding = null;
     location.hash = '';
   }
 
@@ -77,7 +109,29 @@
     else location.hash = '#/recipes';
   }
 
+  function closeList() {
+    if (history.length > 1) history.back();
+    else location.hash = '#/lists';
+  }
+
+  async function makeList(close: () => void) {
+    const name = newListName.trim();
+    if (!name) return;
+    newListBusy = true;
+    try {
+      const list = await createList(name);
+      showToast(`Created ${list.name}`);
+      close();
+    } catch (e) {
+      if (e instanceof AuthError) signOut('That token was rejected — enter it again.');
+      else showToast(e instanceof Error ? e.message : String(e));
+    } finally {
+      newListBusy = false;
+    }
+  }
+
   onMount(() => {
+    setAuthFailedHandler(() => signOut('That token was rejected — enter it again.'));
     const onHash = () => (hash = location.hash);
     window.addEventListener('hashchange', onHash);
     if (authed) load();
@@ -90,7 +144,17 @@
 {:else if recipeId != null}
   <!-- A recipe card: its own full screen, no tab bar. -->
   {#if openRecipe}
-    <RecipeCard entry={openRecipe} onback={closeRecipe} />
+    <RecipeCard
+      entry={openRecipe}
+      onback={closeRecipe}
+      onadd={() =>
+        (adding = {
+          kind: 'recipe',
+          recipeId: openRecipe.recipe.id,
+          name: openRecipe.recipe.name,
+          servings: openRecipe.recipe.servings,
+        })}
+    />
   {:else if loading || book === null}
     <p class="status">{loadError ?? 'Loading…'}</p>
   {:else}
@@ -99,9 +163,21 @@
       <button class="retry" onclick={closeRecipe}>Back to recipes</button>
     </div>
   {/if}
+{:else if listId != null}
+  <!-- A shopping list: its own full screen, no tab bar. -->
+  {#if openList && pantry && book}
+    <ListDetail entry={openList} {book} {pantry} onback={closeList} />
+  {:else if loading || shopping.entries === null}
+    <p class="status">{loadError ?? 'Loading…'}</p>
+  {:else}
+    <div class="status">
+      <p>That list does not exist any more.</p>
+      <button class="retry" onclick={closeList}>Back to lists</button>
+    </div>
+  {/if}
 {:else}
   <header class="topbar">
-    <h1>{tab === 'pantry' ? 'Pantry' : 'Recipe Book'}</h1>
+    <h1>{title}</h1>
     <div class="actions">
       <button class="icon-btn" onclick={load} disabled={loading} aria-label="Refresh">
         <svg viewBox="0 0 24 24" class="icon" aria-hidden="true" class:spin={loading}>
@@ -139,9 +215,29 @@
     {:else if pantry === null || book === null}
       <p class="status">Loading…</p>
     {:else if tab === 'pantry'}
-      <Pantry entries={pantry} />
-    {:else}
-      <Recipes entries={book} />
+      <Pantry
+        entries={pantry}
+        onadd={(e) => (adding = { kind: 'item', itemId: e.item.id, name: e.item.name })}
+      />
+    {:else if tab === 'recipes'}
+      <Recipes
+        entries={book}
+        onadd={(e) =>
+          (adding = {
+            kind: 'recipe',
+            recipeId: e.recipe.id,
+            name: e.recipe.name,
+            servings: e.recipe.servings,
+          })}
+      />
+    {:else if shopping.entries}
+      <Lists
+        entries={shopping.entries}
+        onnew={() => {
+          newListName = '';
+          newListOpen = true;
+        }}
+      />
     {/if}
   </main>
 
@@ -172,7 +268,55 @@
       </svg>
       Recipes
     </a>
+    <a href="#/lists" class:active={tab === 'lists'} aria-current={tab === 'lists' ? 'page' : undefined}>
+      <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
+        <path
+          d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.4"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+      </svg>
+      Lists
+    </a>
   </nav>
+{/if}
+
+{#if adding}
+  <AddSheet
+    target={adding}
+    onclose={() => (adding = null)}
+    onauthfailed={() => signOut('That token was rejected — enter it again.')}
+  />
+{/if}
+
+{#if newListOpen}
+  <Sheet title="New list" onclose={() => (newListOpen = false)}>
+    {#snippet children(close)}
+      <form
+        class="newlist"
+        onsubmit={(e) => {
+          e.preventDefault();
+          makeList(close);
+        }}
+      >
+        <input
+          type="text"
+          placeholder="List name"
+          aria-label="List name"
+          autocomplete="off"
+          bind:value={newListName}
+        />
+        <button type="submit" disabled={newListBusy || !newListName.trim()}>Create</button>
+      </form>
+    {/snippet}
+  </Sheet>
+{/if}
+
+{#if shopping.toast}
+  <div class="toast" role="status">{shopping.toast}</div>
 {/if}
 
 <style>
@@ -267,6 +411,48 @@
 
   .error {
     color: var(--error);
+  }
+
+  .newlist {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .newlist input {
+    padding: 0.9rem 1rem;
+    border-radius: 0.8rem;
+    border: 1px solid var(--line);
+    background: var(--bg);
+    font-size: 1.05rem;
+  }
+
+  .newlist button {
+    padding: 1rem;
+    border: none;
+    border-radius: 0.9rem;
+    background: var(--good);
+    font-size: 1.05rem;
+    font-weight: 700;
+  }
+
+  .newlist button:disabled {
+    opacity: 0.5;
+  }
+
+  /* Sits above the tab bar and any sheet. */
+  .toast {
+    position: fixed;
+    left: 1rem;
+    right: 1rem;
+    bottom: calc(var(--nav-h) + 1rem + env(safe-area-inset-bottom));
+    z-index: 30;
+    padding: 0.9rem 1.1rem;
+    border-radius: 0.9rem;
+    background: #3b3b3a;
+    text-align: center;
+    font-weight: 600;
+    box-shadow: 0 0.4rem 1.2rem rgba(0, 0, 0, 0.45);
   }
 
   .retry {

@@ -17,7 +17,7 @@
 //! fractional tsp/tbsp amounts, numbered and un-numbered methods, and a
 //! source link that isn't a web address.
 
-use kai_server::db::{items, recipe_items, recipes, skus, tags};
+use kai_server::db::{items, recipe_items, recipes, shopping_list_items, shopping_lists, skus, tags};
 use kai_server::state::AppState;
 use kai_shared::skus::{Sku, SkuPrice, SkuQuantity, SkuSize};
 use postgresql_embedded::PostgreSQL;
@@ -176,4 +176,12 @@ async fn seed(c: &deadpool_postgres::Client) {
     let salad = recipes::create(c, "Quick Salad").await.unwrap();
     recipes::update_source_url(c, salad.id, "javascript:alert(1)").await.unwrap();
     recipes::update_method(c, salad.id, "Chop everything and toss it together.").await.unwrap();
+
+    // Shopping lists: one with a loose item and a recipe's expansion (so
+    // grouping shows), and one left empty.
+    let weekly = shopping_lists::create(c, "Weekly Shop").await.unwrap();
+    shopping_list_items::add_item(c, weekly.id, id("Olive Oil"), Some(1.0), Some("count"), None).await.unwrap();
+    shopping_list_items::add_item(c, weekly.id, id("Pasta Spirals"), Some(500.0), Some("g"), None).await.unwrap();
+    shopping_list_items::add_recipe(c, weekly.id, curry.id, Some(4)).await.unwrap();
+    shopping_lists::create(c, "Costco").await.unwrap();
 }

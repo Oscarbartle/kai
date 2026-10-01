@@ -6,7 +6,7 @@
   import type { RecipeBookEntry } from '../lib/types';
   import Picture from './Picture.svelte';
 
-  let { entries }: { entries: RecipeBookEntry[] } = $props();
+  let { entries, onadd }: { entries: RecipeBookEntry[]; onadd: (entry: RecipeBookEntry) => void } = $props();
 
   let search = $state('');
 
@@ -57,6 +57,11 @@
             {/if}
           </div>
         </a>
+        <button class="add" aria-label={`Add ${entry.recipe.name} to a shopping list`} onclick={() => onadd(entry)}>
+          <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+    </svg>
+        </button>
       </li>
     {/each}
   </ul>
@@ -92,6 +97,31 @@
     display: flex;
     flex-direction: column;
     gap: 1rem;
+  }
+
+  li {
+    position: relative;
+  }
+
+  /* Outside the link (a button inside an <a> is invalid and taps would
+     also open the recipe), floated over the photo's corner. */
+  .add {
+    position: absolute;
+    top: 0.7rem;
+    right: 0.7rem;
+    width: 3rem;
+    height: 3rem;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: 50%;
+    background: rgba(23, 23, 22, 0.78);
+    color: #fff;
+    backdrop-filter: blur(6px);
+  }
+
+  .add:active {
+    background: var(--good);
   }
 
   .card {
