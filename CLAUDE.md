@@ -311,6 +311,20 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
   constant, changeable here since real delivery pricing can vary by
   address/timeslot.
 
+- **Settings layout & scrolling.** The sections sit in CSS columns
+  (`column-width: 25rem`, so as many columns as fit, one when narrow;
+  columns rather than a grid because the sections are very different
+  heights and columns pack them without gaps; `break-inside: avoid` keeps
+  a section whole). The window itself must never scroll — `html, body`
+  are `overflow: hidden` in the app shell — and `.content` gets
+  `overflow-y: hidden` (class `locked`) whenever Settings, an item/recipe/
+  list view or the Edit tag dialog is open over it, so the list beneath
+  can't keep a second scrollbar of its own. Its scroll position is kept.
+  Honest note: a window-level double scrollbar could not be reproduced
+  in the browser harness at several window sizes; the nested-scroller case
+  (a full-screen view open over the scrollable list) could, and both are
+  now closed off.
+
 ## Backup / export — implemented (export only, no restore)
 
 - **Settings → Backup → "Export data"** downloads the shared server's whole

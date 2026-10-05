@@ -279,6 +279,7 @@
 
 	<h1>Settings</h1>
 
+	<div class="blocks">
 	<section class="setting-block">
 		<h2>Woolworths account</h2>
 		<p class="blurb">
@@ -530,6 +531,7 @@
 			<p class="error">{exportError}</p>
 		{/if}
 	</section>
+	</div>
 </div>
 
 {#if pendingModeSwitch}
@@ -582,15 +584,25 @@
 		font-size: 1.75rem;
 	}
 
-	.setting-block {
-		max-width: 640px;
-		background: #232322;
-		border-radius: 10px;
-		padding: 1.25rem;
+	/* Sections sit in as many columns as fit (each at least 25rem wide) and
+	   stack into one when the window is narrow. CSS columns rather than a
+	   grid: the sections are very different heights, and columns pack them
+	   tightly instead of leaving a gap under the short ones. */
+	.blocks {
+		column-width: 25rem;
+		column-gap: 1.25rem;
+		max-width: 84rem;
 	}
 
-	.setting-block + .setting-block {
-		margin-top: 1rem;
+	.setting-block {
+		box-sizing: border-box;
+		width: 100%;
+		/* A section is never split across two columns. */
+		break-inside: avoid;
+		margin: 0 0 1.25rem;
+		background: #232322;
+		border-radius: 10px;
+		padding: 1.4rem 1.5rem;
 	}
 
 	.fee-input-wrap {
@@ -629,8 +641,8 @@
 	}
 
 	h2 {
-		margin: 0 0 0.5rem;
-		font-size: 1rem;
+		margin: 0 0 0.6rem;
+		font-size: 1.05rem;
 	}
 
 	.blurb {
@@ -645,6 +657,12 @@
 		align-items: center;
 		flex-wrap: wrap;
 		gap: 0.6rem;
+	}
+
+	/* A row of controls under a stack of fields needs air above it —
+	   Test connection used to sit flush against the token input. */
+	.remote-fields + .status-row {
+		margin-top: 1.1rem;
 	}
 
 	.status-pill {
@@ -696,8 +714,8 @@
 	.remote-fields {
 		display: flex;
 		flex-direction: column;
-		gap: 0.75rem;
-		margin-top: 1rem;
+		gap: 0.9rem;
+		margin-top: 1.2rem;
 	}
 
 	.field {
@@ -709,12 +727,14 @@
 	}
 
 	.field input {
+		box-sizing: border-box;
+		width: 100%;
 		background: #1e1e1d;
 		border: 1px solid #444;
 		border-radius: 6px;
 		color: #fff;
 		font-size: 0.9rem;
-		padding: 0.5rem 0.7rem;
+		padding: 0.6rem 0.75rem;
 	}
 
 	.field input:focus {
@@ -731,7 +751,7 @@
 		border-radius: 6px;
 		font-weight: bold;
 		font-size: 0.85rem;
-		padding: 0.45rem 0.9rem;
+		padding: 0.5rem 1rem;
 		cursor: pointer;
 	}
 

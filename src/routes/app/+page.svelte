@@ -792,7 +792,10 @@
 				</ul>
 			</aside>
 		{/if}
-		<section class="content">
+		<section
+			class="content"
+			class:locked={settingsOpen || selectedItem || selectedRecipe || selectedShoppingList || editingTag}
+		>
 			{#if activeTab === 'recipes'}
 				<div class="toolbar">
 					<input
@@ -1177,9 +1180,13 @@
 </div>
 
 <style>
+	/* The app is a fixed-size shell: header + a region that scrolls inside
+	   it. The window itself must never scroll, or a second scrollbar shows
+	   up beside the region's own. */
 	:global(html, body) {
 		height: 100%;
 		margin: 0;
+		overflow: hidden;
 	}
 
 	.app {
@@ -1446,6 +1453,14 @@
 		color: #fff;
 		padding: 1rem;
 		overflow-y: auto;
+	}
+
+	/* A full-screen view (Settings, an item, a recipe, a list) or a dialog
+	   is open on top: the list underneath must not also be scrollable, or
+	   it keeps a second scrollbar of its own behind the view's. Its scroll
+	   position is kept, so closing the view returns to the same spot. */
+	.content.locked {
+		overflow-y: hidden;
 	}
 
 	.toolbar {
