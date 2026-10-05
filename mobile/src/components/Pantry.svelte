@@ -6,6 +6,7 @@
 <script lang="ts">
   import type { PantryEntry, Tag } from '../lib/types';
   import { cheapestSku, itemImage, money } from '../lib/format';
+  import { staleAgeDays } from '../lib/freshness';
   import Picture from './Picture.svelte';
 
   let { entries, onadd }: { entries: PantryEntry[]; onadd: (entry: PantryEntry) => void } = $props();
@@ -79,6 +80,9 @@
           <span class="name">{entry.item.name}</span>
           {#if entry.tags.length}
             <span class="tags">{entry.tags.map((t) => t.name).join(' · ')}</span>
+          {/if}
+          {#if staleAgeDays(entry.skus) != null}
+            <span class="stale">⚠ Price {staleAgeDays(entry.skus)} days old</span>
           {/if}
           <div class="price">
             {#if best === null || best.price.sale_price == null}
@@ -203,6 +207,12 @@
   .tags {
     color: var(--muted);
     font-size: 0.85rem;
+  }
+
+  .stale {
+    color: #c99a3d;
+    font-size: 0.8rem;
+    font-weight: 700;
   }
 
   .price {

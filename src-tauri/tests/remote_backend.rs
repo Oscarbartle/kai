@@ -105,6 +105,11 @@ async fn remote_backend_round_trips_against_a_real_server() {
         .expect("save sku");
     assert_eq!(stored.sku.sku, "144329");
     assert_eq!(stored.sku.price.sale_price, Some(3.5));
+    assert!(
+        stored.updated_at.contains('T') && stored.updated_at.starts_with("20"),
+        "server must send an RFC 3339 updated_at, got {:?}",
+        stored.updated_at
+    );
     let skus_for_item = remote.list_skus_for_item(onion.id).await.expect("list skus");
     assert_eq!(skus_for_item.len(), 1);
 

@@ -158,7 +158,8 @@ pub fn get(conn: &Connection, id: i64) -> Result<StoredSku, String> {
             unit, quantity_min, quantity_max, quantity_increment,
             supports_both_units, average_weight_per_unit,
             availability_status, stock_level, images, allergens, ingredients,
-            is_preferred
+            is_preferred,
+            strftime('%Y-%m-%dT%H:%M:%SZ', updated_at)
         FROM skus WHERE id = ?1",
         params![id],
         |row| {
@@ -170,6 +171,7 @@ pub fn get(conn: &Connection, id: i64) -> Result<StoredSku, String> {
                 id: row.get(0)?,
                 item_id: row.get(1)?,
                 is_preferred: row.get(28)?,
+                updated_at: row.get::<_, Option<String>>(29)?.unwrap_or_default(),
                 sku: Sku {
                     provider: row.get(2)?,
                     sku: row.get(3)?,
@@ -209,3 +211,65 @@ pub fn get(conn: &Connection, id: i64) -> Result<StoredSku, String> {
     )
     .map_err(|e| format!("Couldn't load SKU {id}: {e}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::items;
+
+    fn sku() -> Sku {
+        Sku {
+            provider: "woolworths".into(),
+            sku: "144329".into(),
+            name: "onions".into(),
+            brand: None,
+            variety: None,
+            price: SkuPrice::default(),
+            size: SkuSize::default(),
+            quantity: SkuQuantity {
+                unit: "Each".into(),
+                ..Default::default()
+            },
+            availability_status: None,
+            stock_level: None,
+            images: vec![],
+            allergens: vec![],
+            ingredients: vec![],
+        }
+    }
+
+    fn conn() -> Connection {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        crate::db::migrations().to_latest(&mut conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn updated_at_is_when_it_was_fetched_and_starring_does_not_touch_it() {
+        let conn = conn();
+        let item = items::create(&conn, "Onion").unwrap();
+
+        let stored = save(&conn, item.id, &sku()).unwrap();
+        // RFC 3339 in UTC, so the apps can parse it without guessing a zone.
+        assert!(stored.updated_at.ends_with('Z') && stored.updated_at.contains('T'), "{}", stored.updated_at);
+        assert!(stored.updated_at.starts_with("20"));
+
+        // Pretend it was fetched long ago.
+        conn.execute(
+            "UPDATE skus SET updated_at = '2020-01-02 03:04:05' WHERE id = ?1",
+            params![stored.id],
+        )
+        .unwrap();
+        assert_eq!(get(&conn, stored.id).unwrap().updated_at, "2020-01-02T03:04:05Z");
+
+        // Starring a SKU is not a price check: the age must not reset.
+        set_preferred(&conn, stored.id, true).unwrap();
+        assert_eq!(get(&conn, stored.id).unwrap().updated_at, "2020-01-02T03:04:05Z");
+
+        // A refresh (a save of the same SKU again) does reset it.
+        save(&conn, item.id, &sku()).unwrap();
+        assert_ne!(get(&conn, stored.id).unwrap().updated_at, "2020-01-02T03:04:05Z");
+    }
+}
+

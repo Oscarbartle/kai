@@ -13,6 +13,7 @@
 	import Settings from './Settings.svelte';
 	import CartAdd from './CartAdd.svelte';
 	import TagEditor from './TagEditor.svelte';
+	import { staleAgeDays } from './skuFreshness';
 	import { priceSkuGroups, sumSkuGroupTotals, type PricingSku } from './shoppingListPricing';
 
 	type Tab = 'pantry' | 'recipes' | 'shopping-list';
@@ -157,6 +158,8 @@
 			is_special: boolean;
 		};
 		images: string[];
+		// When Woolworths was last asked about this SKU (UTC, RFC 3339).
+		updated_at?: string;
 	}
 
 	interface ItemCard {
@@ -250,17 +253,21 @@
 
 	let refreshingAllPantry: boolean = $state(false);
 
+	// Items with at least one SKU not refreshed in 14+ days.
+	let staleItemCount = $derived(cards.filter((c) => staleAgeDays(c.skus) != null).length);
+
 	// Sequential, not Promise.all — a burst of simultaneous requests to
 	// Woolworths for every item at once is worth avoiding, and it mirrors
 	// how the backend's own refresh_skus_for_item already refreshes a
 	// single item's SKUs one at a time.
-	async function refreshAllPantry() {
+	async function refreshAllPantry(onlyStale = false) {
 		if (refreshingAllPantry) return;
 		error = null;
 		refreshingAllPantry = true;
 		try {
-			for (const card of cards) {
+			for (const card of [...cards]) {
 				if (card.skus.length === 0) continue;
+				if (onlyStale && staleAgeDays(card.skus) == null) continue;
 				refreshingItemIds = new Set(refreshingItemIds).add(card.item.id);
 				try {
 					card.skus = await invoke('refresh_skus_for_item', { itemId: card.item.id });
@@ -1012,10 +1019,20 @@
 				<button
 					class="refresh-pantry"
 					disabled={refreshingAllPantry}
-					onclick={refreshAllPantry}
+					onclick={() => refreshAllPantry()}
 				>
 					{refreshingAllPantry ? 'Refreshing…' : '⟳ Refresh pantry'}
 				</button>
+				{#if staleItemCount > 0}
+					<button
+						class="refresh-pantry stale"
+						disabled={refreshingAllPantry}
+						title="Refresh only the items with prices older than 14 days"
+						onclick={() => refreshAllPantry(true)}
+					>
+						⚠ Refresh stale ({staleItemCount})
+					</button>
+				{/if}
 			</div>
 			{#if error}
 				<p class="error">{error}</p>
@@ -1074,6 +1091,14 @@
 						</div>
 						<div class="sku-count">
 						SKUS: {card.skus.length}
+						{#if staleAgeDays(card.skus) != null}
+							<span
+								class="stale-badge"
+								title="Prices last updated {staleAgeDays(card.skus)} days ago — refresh to update"
+							>
+								⚠ {staleAgeDays(card.skus)}d old
+							</span>
+						{/if}
 						{#if card.skus.length > 0}
 							<button
 								class="refresh-btn"
@@ -1623,6 +1648,17 @@
 		outline: none;
 	}
 
+	.stale-badge {
+		color: var(--color-warning);
+		font-weight: bold;
+	}
+
+	.refresh-pantry.stale {
+		margin-left: 0.5rem;
+		color: var(--color-warning);
+		border-color: var(--color-warning);
+	}
+
 	.sku-count {
 		font-size: 0.65rem;
 		font-weight: bold;
@@ -1704,8 +1740,12 @@
 		text-decoration: line-through;
 	}
 
+	/* Fixed, not absolute: .content is the scroll container, and an absolute
+	   child of a scroller scrolls away with the content, so with enough
+	   cards the button ended up mid-screen. .content runs to the window's
+	   right and bottom edges, so this is the same spot, pinned. */
 	.add-item {
-		position: absolute;
+		position: fixed;
 		right: 1.5rem;
 		bottom: 1.5rem;
 		width: 3rem;

@@ -9,6 +9,7 @@
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import CartAdd from './CartAdd.svelte';
 	import { parsePackSize, priceSkuGroups } from './shoppingListPricing';
+	import { staleAgeDays } from './skuFreshness';
 
 	interface DbShoppingList {
 		id: number;
@@ -115,6 +116,13 @@
 		availability_status: string | null;
 		images: string[];
 		allergens: string[];
+		// When Woolworths was last asked about this SKU (UTC, RFC 3339).
+		updated_at?: string;
+	}
+
+	// Age in days if this SKU's data is 14+ days old, else null.
+	function skuAge(sku: StoredSku): number | null {
+		return staleAgeDays([sku]);
 	}
 
 	interface PickerItem {
@@ -915,6 +923,14 @@
 								{#if group.sku.allergens.length}
 									<span class="sku-allergens">⚠ {group.sku.allergens.join(', ')}</span>
 								{/if}
+								{#if skuAge(group.sku) != null}
+									<span
+										class="sku-stale"
+										title="This SKU's price was last updated {skuAge(group.sku)} days ago"
+									>
+										⚠ price {skuAge(group.sku)}d old
+									</span>
+								{/if}
 							</p>
 						</div>
 						<div class="sku-totals">
@@ -1532,6 +1548,12 @@
 	.sku-meta .special {
 		color: #ff8a80;
 		text-decoration: line-through;
+		margin-left: 0.3rem;
+	}
+
+	.sku-meta .sku-stale {
+		color: var(--color-warning);
+		font-weight: bold;
 		margin-left: 0.3rem;
 	}
 

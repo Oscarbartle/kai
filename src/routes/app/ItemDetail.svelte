@@ -8,6 +8,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { tick } from 'svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
+	import { staleAgeDays } from './skuFreshness';
 
 	interface DbItem {
 		id: number;
@@ -62,6 +63,7 @@
 		id: number;
 		item_id: number;
 		is_preferred: boolean;
+		updated_at?: string;
 	}
 
 	interface SkuSlot {
@@ -508,6 +510,11 @@
 							{/if}
 							{#if slot.refreshError}
 								<p class="inline-error">Refresh failed: {slot.refreshError}</p>
+							{/if}
+							{#if staleAgeDays([slot.data as { updated_at?: string }]) != null}
+								<p class="sku-stale">
+									⚠ Price last updated {staleAgeDays([slot.data as { updated_at?: string }])} days ago
+								</p>
 							{/if}
 							<p class="sku-meta">
 								{slot.data.brand ?? ''}
@@ -1005,5 +1012,12 @@
 	.sku-allergens {
 		color: #d9a441;
 		font-size: 0.75rem;
+	}
+
+	.sku-stale {
+		margin: 0;
+		color: var(--color-warning);
+		font-size: 0.75rem;
+		font-weight: bold;
 	}
 </style>

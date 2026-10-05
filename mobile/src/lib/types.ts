@@ -23,6 +23,8 @@ export interface StoredSku {
     is_special: boolean;
   };
   images: string[];
+  /** When Woolworths was last asked about this SKU (UTC, RFC 3339). */
+  updated_at?: string;
 }
 
 export interface PantryEntry {

@@ -722,6 +722,45 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
   sequential across items too, not `Promise.all`, to avoid a burst of
   simultaneous requests to Woolworths.
 
+- **Stale-price flag — implemented (14 days).** `skus.updated_at` already
+  existed in both databases and is written by the save/refresh upsert and
+  *nothing else* (starring a SKU as preferred does not touch it — unit
+  tested), so it is exactly "when did we last ask Woolworths". It just
+  wasn't on the wire: `StoredSku` now carries `updated_at` (RFC 3339, UTC;
+  SQLite's `datetime('now')` is normalised with `strftime`, Postgres's
+  `TIMESTAMPTZ` with chrono). `#[serde(default)]`, so a newer desktop app
+  still works against a server from before the field existed — it just
+  shows no badges until the server is redeployed.
+  - **Rule**: an item is flagged if its *oldest* SKU is 14+ days old (the
+    cheapest pick compares all of an item's SKUs, so it is only as
+    current as the stalest). Unknown dates (older server, a SKU just
+    fetched this session) are never flagged — no badge rather than a
+    wrong one. The rule lives in `src/routes/app/skuFreshness.ts` and, for
+    the phone, `mobile/src/lib/freshness.ts` (a small deliberate
+    duplicate — two separate frontends; the phone copy is unit-tested).
+  - **Where it shows**: an amber "⚠ Nd old" on each Pantry card next to
+    "SKUS: n"; a "⚠ Price N days ago" line per SKU in the item detail; a
+    "⚠ price Nd old" in the shopping list's "SKUs needed" rows; and a
+    "⚠ Price N days old" line on the phone's Pantry rows. A **"⚠ Refresh
+    stale (n)"** button appears beside "Refresh pantry" only while n > 0,
+    and refreshes just those items (sequentially, like refresh-all).
+    Deliberately just a badge: it never blocks or changes anything.
+  - **Designed, not built yet — refresh on add.** Nothing refreshes SKU
+    data on add-to-list today (refresh is only ever a button press), and
+    nothing crawls on a schedule. Oscar's decisions: when an item or
+    recipe is added to a list, refresh its SKUs **if older than 1 day**;
+    the add happens **immediately** (the UI must stay responsive) and the
+    refresh runs in the background, sequentially; when it lands, a line
+    is **swapped to a cheaper SKU** if there is one. Constraints for that
+    swap, so it can't undo a choice: only swap a line whose SKU is still
+    the auto-pick from when it was added (never one the user changed),
+    and use the same `cheapest_sku_id` rule as a fresh add so a starred ★
+    SKU still wins. It can be built from existing commands
+    (`refresh_skus_for_item`, `cheapest_sku_id`, `set_shopping_list_item_sku`).
+    The **phone can't refresh** — the Woolworths fetcher lives in the
+    desktop app and the server has none — so adds from the phone stay on
+    the old data until a desktop refresh or a server-side fetcher exists.
+
 ## Phase B: shared remote database — done
 
 - **Goal**: genuine shared multi-user use (Oscar + partner), not backup —

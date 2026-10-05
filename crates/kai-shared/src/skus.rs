@@ -67,6 +67,13 @@ pub struct StoredSku {
     /// `shopping_list_items::cheapest_sku_id`. At most one SKU per item
     /// can be preferred at a time (see `db::skus::set_preferred`).
     pub is_preferred: bool,
+    /// When this SKU was last fetched from the provider (UTC, RFC 3339) —
+    /// set by every save/refresh and nothing else, so it is exactly "how
+    /// old is this price". Empty if unknown (a server from before this
+    /// field existed); `#[serde(default)]` keeps a newer desktop app
+    /// working against an older server mid-deploy.
+    #[serde(default)]
+    pub updated_at: String,
     #[serde(flatten)]
     pub sku: Sku,
 }

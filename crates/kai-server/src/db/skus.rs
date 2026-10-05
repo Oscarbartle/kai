@@ -3,6 +3,7 @@
 //! straight into `Vec<String>` via `tokio-postgres`'s serde_json support,
 //! no manual (de)serialization step needed.
 
+use chrono::{DateTime, Utc};
 use deadpool_postgres::Client;
 use kai_shared::skus::{Sku, SkuPrice, SkuQuantity, SkuSize, StoredSku};
 use serde_json::Value as Json;
@@ -15,7 +16,7 @@ const SELECT_COLUMNS: &str = "
     unit, quantity_min, quantity_max, quantity_increment,
     supports_both_units, average_weight_per_unit,
     availability_status, stock_level, images, allergens, ingredients,
-    is_preferred
+    is_preferred, updated_at
 ";
 
 fn json_strings(v: Json) -> Vec<String> {
@@ -29,6 +30,7 @@ fn row_to_sku(row: &tokio_postgres::Row) -> StoredSku {
         id: row.get(0),
         item_id: row.get(1),
         is_preferred: row.get(28),
+        updated_at: row.get::<_, DateTime<Utc>>(29).to_rfc3339(),
         sku: Sku {
             provider: row.get(2),
             sku: row.get(3),
