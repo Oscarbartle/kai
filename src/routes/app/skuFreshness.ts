@@ -41,3 +41,31 @@ export function staleAgeDays(skus: { updated_at?: string }[], now: number = Date
 	const age = oldestAgeDays(skus, now);
 	return age != null && age >= STALE_AFTER_DAYS ? age : null;
 }
+
+/** "today", "yesterday" or "N days ago" for a whole-day age. */
+export function relativeAge(days: number): string {
+	if (days <= 0) return 'today';
+	if (days === 1) return 'yesterday';
+	return `${days} days ago`;
+}
+
+/** What the item page shows for one SKU: when it was last refreshed, as
+ *  both a relative age and the calendar date ("3 days ago · 3 Oct 2026"),
+ *  plus whether it has crossed the stale line. `null` when unknown. */
+export function describeUpdated(
+	updatedAt: string | null | undefined,
+	now: number = Date.now()
+): { text: string; stale: boolean } | null {
+	const age = skuAgeDays(updatedAt, now);
+	if (age == null) return null;
+	const date = new Date(Date.parse(updatedAt as string)).toLocaleDateString(undefined, {
+		day: 'numeric',
+		month: 'short',
+		year: 'numeric'
+	});
+	return {
+		text: age === 0 ? 'today' : `${relativeAge(age)} · ${date}`,
+		stale: age >= STALE_AFTER_DAYS
+	};
+}
+

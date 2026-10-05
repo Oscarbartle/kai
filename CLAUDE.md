@@ -739,7 +739,9 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
     the phone, `mobile/src/lib/freshness.ts` (a small deliberate
     duplicate — two separate frontends; the phone copy is unit-tested).
   - **Where it shows**: an amber "⚠ Nd old" on each Pantry card next to
-    "SKUS: n"; a "⚠ Price N days ago" line per SKU in the item detail; a
+    "SKUS: n"; a "Last refreshed 5 days ago · 16 Oct 2026" line under every
+    SKU in the item detail (always shown when the date is known — amber
+    with a ⚠ once stale; a SKU just added shows "today"); a
     "⚠ price Nd old" in the shopping list's "SKUs needed" rows; and a
     "⚠ Price N days old" line on the phone's Pantry rows. A **"⚠ Refresh
     stale (n)"** button appears beside "Refresh pantry" only while n > 0,

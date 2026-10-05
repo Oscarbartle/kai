@@ -8,7 +8,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { tick } from 'svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
-	import { staleAgeDays } from './skuFreshness';
+	import { describeUpdated } from './skuFreshness';
 
 	interface DbItem {
 		id: number;
@@ -264,6 +264,7 @@
 		try {
 			const stored = await invoke<StoredSku>('save_sku_to_item', { itemId: item.id, sku: slot.data });
 			slot.dbId = stored.id;
+			if (slot.data) slot.data = { ...slot.data, updated_at: stored.updated_at } as SkuData;
 		} catch (e) {
 			slot.saveError = String(e);
 		}
@@ -511,9 +512,10 @@
 							{#if slot.refreshError}
 								<p class="inline-error">Refresh failed: {slot.refreshError}</p>
 							{/if}
-							{#if staleAgeDays([slot.data as { updated_at?: string }]) != null}
-								<p class="sku-stale">
-									⚠ Price last updated {staleAgeDays([slot.data as { updated_at?: string }])} days ago
+							{#if describeUpdated((slot.data as { updated_at?: string }).updated_at) != null}
+								{@const updated = describeUpdated((slot.data as { updated_at?: string }).updated_at)!}
+								<p class="sku-updated" class:stale={updated.stale}>
+									{updated.stale ? '⚠ ' : ''}Last refreshed {updated.text}
 								</p>
 							{/if}
 							<p class="sku-meta">
@@ -1014,10 +1016,14 @@
 		font-size: 0.75rem;
 	}
 
-	.sku-stale {
+	.sku-updated {
 		margin: 0;
-		color: var(--color-warning);
+		color: #999;
 		font-size: 0.75rem;
+	}
+
+	.sku-updated.stale {
+		color: var(--color-warning);
 		font-weight: bold;
 	}
 </style>
