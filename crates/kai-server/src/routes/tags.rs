@@ -4,7 +4,7 @@ use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::routing::{get, patch};
 use axum::{Json, Router};
-use kai_shared::tags::Tag;
+use kai_shared::tags::{Tag, TagMembershipChanges};
 use serde::Deserialize;
 
 pub fn router() -> Router<AppState> {
@@ -13,6 +13,8 @@ pub fn router() -> Router<AppState> {
         .route("/items/{item_id}/tags", get(list_tags_for_item).post(add_tag_to_item))
         .route("/items/{item_id}/tags/{tag_id}", axum::routing::delete(remove_tag_from_item))
         .route("/tags/{id}/emoji", patch(set_tag_emoji))
+        .route("/tags/{id}/name", patch(rename_tag))
+        .route("/tags/{id}/members", patch(apply_tag_changes))
         .route(
             "/recipes/{recipe_id}/tags",
             get(list_tags_for_recipe).post(add_tag_to_recipe),
@@ -96,5 +98,24 @@ async fn remove_tag_from_recipe(
 ) -> Result<(), AppError> {
     let client = state.pool.get().await?;
     tags::remove_from_recipe(&client, recipe_id, tag_id).await?;
+    Ok(())
+}
+
+async fn rename_tag(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<NameBody>,
+) -> Result<Json<Tag>, AppError> {
+    let client = state.pool.get().await?;
+    Ok(Json(tags::rename(&client, id, &body.name).await?))
+}
+
+async fn apply_tag_changes(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(changes): Json<TagMembershipChanges>,
+) -> Result<(), AppError> {
+    let mut client = state.pool.get().await?;
+    tags::apply_membership_changes(&mut client, id, &changes).await?;
     Ok(())
 }

@@ -458,14 +458,52 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
     `null` = "use auto"). Deliberately **not** shown on the plain tag
     pills on item/recipe cards — cosmetic sidebar flourish only, kept out
     of the denser card view. Override via a hover-revealed "✎" inside the
-    pill (`e.stopPropagation()`'d so it doesn't also toggle the filter);
-    opens an inline emoji input, same blur-to-save pattern as everywhere
-    else, plus a "Reset to auto" that clears the override back to `null`
-    rather than guessing a specific replacement emoji. `set_tag_emoji`
-    updates every copy of that tag across `cards`/`recipeCards` (each
-    card fetched its own separate copy via `list_tags_for_item`/
-    `list_tags_for_recipe`, so a single object mutation wouldn't reach
-    the others) rather than reloading everything from scratch.
+    pill (`e.stopPropagation()`'d so it doesn't also toggle the filter),
+    which now opens the **Edit tag dialog** (below) — emoji input with the
+    same blur-to-save pattern, plus a "Reset emoji to auto" that clears
+    the override back to `null` rather than guessing a specific
+    replacement emoji. `set_tag_emoji` updates every copy of that tag
+    across `cards`/`recipeCards` (each card fetched its own separate copy
+    via `list_tags_for_item`/`list_tags_for_recipe`, so a single object
+    mutation wouldn't reach the others) rather than reloading everything
+    from scratch.
+  - **Edit tag dialog / bulk tag edit — implemented** (`TagEditor.svelte`,
+    desktop only; the phone app has no tag editing). The ✎ used to open a
+    tiny inline emoji strip; it now opens a modal that works on the tag
+    **everywhere at once** — Pantry and Recipe Book share the one `tags`
+    row, so there's no per-tab version of it:
+    - **Rename** (`rename_tag`): saves on blur/Enter like everything else,
+      and shows on every item and recipe immediately since it's one row.
+      A name another tag already has (case-insensitively) is **refused**
+      with "A tag called 'X' already exists" rather than merged — merging
+      is destructive and was deliberately left for a feature of its own.
+      Changing only the case of the tag's own name is allowed.
+    - **Used by**: checklists of every item and recipe, ticked where the
+      tag already applies, with a search box and "Select shown / Clear
+      shown" (which act on what the search currently shows). Ticks are
+      only **staged** — nothing is saved until **Apply N changes**, so a
+      big batch can be reviewed or abandoned. This is the one place the
+      app's implicit-save rule is broken on purpose (chosen by Oscar):
+      accidentally unticking 30 items shouldn't have already happened.
+    - `apply_tag_changes` takes a **diff** (`TagMembershipChanges`:
+      add/remove item ids and recipe ids), not the final membership, so a
+      change made by the other person since the dialog opened isn't
+      overwritten for items you didn't touch. It runs in one transaction —
+      an unknown id anywhere rolls the whole batch back (unit-tested on
+      SQLite, and through `RemoteBackend` against real Postgres in
+      `remote_backend.rs`). Removals apply before additions; re-tagging
+      something already tagged is a quiet no-op.
+    - The dialog keeps its own copy of the tag (`editingTag`) because a tag
+      drops out of the sidebar the moment nothing on the current tab uses
+      it, which would otherwise pull the dialog out from under an
+      in-progress edit. After Apply the on-screen cards are patched in
+      place rather than reloaded.
+    - Verified by running the real `/app` page in a browser against an
+      in-memory fake of Tauri's `invoke` (a throwaway Vite config, deleted
+      afterwards): dialog pre-ticks the right rows, a clashing rename
+      shows the error and reverts the field, a real rename and emoji
+      change/reset reach the sidebar, and Apply sends exactly the
+      difference. **Not tried in the real Tauri window.**
 - **Recipe ↔ Item links** (`recipe_items` join table): a recipe can hold
   multiple items. Adding an item to a recipe reuses an existing item by
   name (case-insensitive match against everything in the Pantry) if one

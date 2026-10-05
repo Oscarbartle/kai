@@ -21,7 +21,7 @@ use crate::db::recipes::Recipe;
 use crate::db::shopping_list_items::{OmissionReport, ShoppingListLine};
 use crate::db::shopping_lists::ShoppingList;
 use crate::db::skus::StoredSku;
-use crate::db::tags::Tag;
+use crate::db::tags::{Tag, TagMembershipChanges};
 use crate::woolworths::Sku;
 use async_trait::async_trait;
 use rusqlite::Connection;
@@ -108,6 +108,16 @@ impl TagsBackend for LocalBackend {
     }
     async fn set_tag_emoji(&self, tag_id: i64, emoji: Option<&str>) -> Result<Tag, String> {
         tags::set_emoji(&*self.lock()?, tag_id, emoji)
+    }
+    async fn rename_tag(&self, tag_id: i64, name: &str) -> Result<Tag, String> {
+        tags::rename(&*self.lock()?, tag_id, name)
+    }
+    async fn apply_tag_changes(
+        &self,
+        tag_id: i64,
+        changes: &TagMembershipChanges,
+    ) -> Result<(), String> {
+        tags::apply_membership_changes(&*self.lock()?, tag_id, changes)
     }
     async fn list_tags_for_recipe(&self, recipe_id: i64) -> Result<Vec<Tag>, String> {
         tags::list_for_recipe(&*self.lock()?, recipe_id)

@@ -12,6 +12,7 @@
 	import ShoppingListDetail from './ShoppingListDetail.svelte';
 	import Settings from './Settings.svelte';
 	import CartAdd from './CartAdd.svelte';
+	import TagEditor from './TagEditor.svelte';
 	import { priceSkuGroups, sumSkuGroupTotals, type PricingSku } from './shoppingListPricing';
 
 	type Tab = 'pantry' | 'recipes' | 'shopping-list';
@@ -90,7 +91,7 @@
 	// Best-effort keyword → emoji mapping for a tag's default look on the
 	// sidebar toggle — purely cosmetic, no accuracy guarantee. Checked as
 	// substrings against the lowercased tag name, first match wins.
-	// Always overridable per-tag (see startEditingTagEmoji/saveTagEmoji),
+	// Always overridable per-tag (see TagEditor.svelte),
 	// so a wrong or missing guess is a one-click fix, not a dead end.
 	const TAG_EMOJI_KEYWORDS: [string, string][] = [
 		['vegetarian', '🥗'],
@@ -610,38 +611,72 @@
 		}
 	}
 
-	let editingTagEmojiId: number | null = $state(null);
-	let tagEmojiDraft: string = $state('');
+	const byTagName = (x: Tag, y: Tag) => x.name.localeCompare(y.name, undefined, { sensitivity: 'base' });
 
-	function startEditingTagEmoji(tag: Tag) {
-		editingTagEmojiId = tag.id;
-		tagEmojiDraft = tag.emoji ?? autoEmojiForTag(tag.name);
-	}
-
-	async function saveTagEmoji(tag: Tag) {
-		editingTagEmojiId = null;
-		const trimmed = tagEmojiDraft.trim();
-		const emoji = trimmed === '' ? null : trimmed;
-		if (emoji === tag.emoji) return;
-		error = null;
-		try {
-			const updated: Tag = await invoke('set_tag_emoji', { tagId: tag.id, emoji });
-			applyTagEmojiEverywhere(tag.id, updated.emoji);
-		} catch (e) {
-			error = String(e);
+	// A rename lands on every card's own copy of the tag, for the same
+	// reason as the emoji above, and re-sorts each card's tags since they
+	// are kept alphabetical.
+	function applyTagNameEverywhere(tagId: number, name: string) {
+		for (const card of [...cards, ...recipeCards]) {
+			const t = card.tags.find((t) => t.id === tagId);
+			if (t) {
+				t.name = name;
+				card.tags.sort(byTagName);
+			}
 		}
 	}
 
-	async function resetTagEmoji(tag: Tag) {
-		editingTagEmojiId = null;
-		if (tag.emoji === null) return;
-		error = null;
-		try {
-			await invoke('set_tag_emoji', { tagId: tag.id, emoji: null });
-			applyTagEmojiEverywhere(tag.id, null);
-		} catch (e) {
-			error = String(e);
-		}
+	// The tag being edited in the Edit tag dialog, kept as its own copy so
+	// it survives the tag dropping out of the sidebar (a tag only shows
+	// there while something on the current tab uses it).
+	let editingTag: Tag | null = $state(null);
+
+	function openTagEditor(tag: Tag) {
+		editingTag = { ...tag };
+	}
+
+	async function renameEditingTag(name: string) {
+		if (!editingTag) return;
+		const updated: Tag = await invoke('rename_tag', { tagId: editingTag.id, name });
+		applyTagNameEverywhere(updated.id, updated.name);
+		editingTag = { ...editingTag, name: updated.name };
+	}
+
+	async function setEditingTagEmoji(emoji: string | null) {
+		if (!editingTag) return;
+		const updated: Tag = await invoke('set_tag_emoji', { tagId: editingTag.id, emoji });
+		applyTagEmojiEverywhere(updated.id, updated.emoji);
+		editingTag = { ...editingTag, emoji: updated.emoji };
+	}
+
+	async function applyEditingTagChanges(changes: {
+		add_item_ids: number[];
+		remove_item_ids: number[];
+		add_recipe_ids: number[];
+		remove_recipe_ids: number[];
+	}) {
+		const tag = editingTag;
+		if (!tag) return;
+		await invoke('apply_tag_changes', { tagId: tag.id, changes });
+		// Mirror the batch onto the cards already on screen rather than
+		// reloading everything.
+		const update = (
+			list: { tags: Tag[] }[],
+			idOf: (c: any) => number,
+			add: number[],
+			remove: number[]
+		) => {
+			for (const card of list) {
+				const id = idOf(card);
+				if (remove.includes(id)) {
+					card.tags = card.tags.filter((t) => t.id !== tag.id);
+				} else if (add.includes(id) && !card.tags.some((t) => t.id === tag.id)) {
+					card.tags = [...card.tags, { ...tag }].sort(byTagName);
+				}
+			}
+		};
+		update(cards, (c) => c.item.id, changes.add_item_ids, changes.remove_item_ids);
+		update(recipeCards, (c) => c.recipe.id, changes.add_recipe_ids, changes.remove_recipe_ids);
 	}
 
 	let itemSearch: string = $state('');
@@ -736,30 +771,15 @@
 								<span class="tag-name">{tag.name}</span>
 								<button
 									class="tag-emoji-edit-btn"
-									aria-label="Change emoji for {tag.name}"
+									aria-label="Edit tag {tag.name}"
 									onclick={(e) => {
 										e.stopPropagation();
-										startEditingTagEmoji(tag);
+										openTagEditor(tag);
 									}}
 								>
 									✎
 								</button>
 							</div>
-							{#if editingTagEmojiId === tag.id}
-								<div class="tag-emoji-editor">
-									<input
-										class="tag-emoji-input"
-										bind:value={tagEmojiDraft}
-										onblur={() => saveTagEmoji(tag)}
-										onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-										placeholder="Emoji"
-										maxlength="8"
-									/>
-									<button class="tag-emoji-reset" onclick={() => resetTagEmoji(tag)}>
-										Reset to auto
-									</button>
-								</div>
-							{/if}
 						</li>
 					{/each}
 				</ul>
@@ -1106,6 +1126,29 @@
 			}}
 		/>
 	{/if}
+
+	{#if editingTag}
+		<TagEditor
+			tag={editingTag}
+			autoEmoji={autoEmojiForTag(editingTag.name)}
+			items={cards
+				.map((c) => ({ id: c.item.id, name: c.item.name }))
+				.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))}
+			recipes={recipeCards
+				.map((c) => ({ id: c.recipe.id, name: c.recipe.name }))
+				.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))}
+			itemHas={new Set(
+				cards.filter((c) => c.tags.some((t) => t.id === editingTag!.id)).map((c) => c.item.id)
+			)}
+			recipeHas={new Set(
+				recipeCards.filter((c) => c.tags.some((t) => t.id === editingTag!.id)).map((c) => c.recipe.id)
+			)}
+			onrename={renameEditingTag}
+			onemoji={setEditingTagEmoji}
+			onapply={applyEditingTagChanges}
+			onclose={() => (editingTag = null)}
+		/>
+	{/if}
 </div>
 
 <style>
@@ -1348,39 +1391,6 @@
 
 	.tag-filter:hover .tag-emoji-edit-btn {
 		opacity: 1;
-	}
-
-	.tag-emoji-editor {
-		display: flex;
-		align-items: center;
-		gap: 0.4rem;
-		margin: 0.35rem 0 0;
-	}
-
-	.tag-emoji-input {
-		width: 3.2rem;
-		box-sizing: border-box;
-		background: #1e1e1d;
-		border: 1px solid #3a4a55;
-		border-radius: 6px;
-		color: #fff;
-		font-size: 1rem;
-		text-align: center;
-		padding: 0.3rem 0.2rem;
-	}
-
-	.tag-emoji-input:focus {
-		outline: none;
-	}
-
-	.tag-emoji-reset {
-		background: none;
-		border: none;
-		color: #999;
-		font-size: 0.7rem;
-		text-decoration: underline;
-		padding: 0;
-		cursor: pointer;
 	}
 
 	.tag-filter {

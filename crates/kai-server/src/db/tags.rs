@@ -3,7 +3,7 @@
 //! no `COLLATE NOCASE` equivalent needed in the queries themselves.
 
 use deadpool_postgres::Client;
-use kai_shared::tags::Tag;
+use kai_shared::tags::{Tag, TagMembershipChanges};
 
 fn row_to_tag(row: &tokio_postgres::Row) -> Tag {
     Tag {
@@ -142,4 +142,82 @@ pub async fn remove_from_recipe(client: &Client, recipe_id: i64, tag_id: i64) ->
         .await
         .map_err(|e| format!("Couldn't remove tag {tag_id} from recipe {recipe_id}: {e}"))?;
     Ok(())
+}
+
+async fn get(client: &Client, tag_id: i64) -> Result<Tag, String> {
+    client
+        .query_opt("SELECT id, name, emoji FROM tags WHERE id = $1", &[&tag_id])
+        .await
+        .map_err(|e| format!("Couldn't load tag {tag_id}: {e}"))?
+        .map(|row| row_to_tag(&row))
+        .ok_or_else(|| format!("No tag with id {tag_id}"))
+}
+
+/// Renames a tag; see the SQLite side's doc comment. `tags.name` is
+/// CITEXT, so the clash check is already case-insensitive.
+pub async fn rename(client: &Client, tag_id: i64, name: &str) -> Result<Tag, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Tag name can't be empty".into());
+    }
+    get(client, tag_id).await?;
+    let clash = client
+        .query_opt(
+            "SELECT id FROM tags WHERE name = $1 AND id <> $2",
+            &[&name, &tag_id],
+        )
+        .await
+        .map_err(|e| format!("Couldn't check for an existing tag '{name}': {e}"))?;
+    if clash.is_some() {
+        return Err(format!("A tag called '{name}' already exists"));
+    }
+    client
+        .execute("UPDATE tags SET name = $1 WHERE id = $2", &[&name, &tag_id])
+        .await
+        .map_err(|e| format!("Couldn't rename tag {tag_id}: {e}"))?;
+    get(client, tag_id).await
+}
+
+/// Applies a batch of tag/untag changes in one transaction — all of it or
+/// none of it. Takes `&mut Client` because a transaction needs exclusive
+/// use of the connection.
+pub async fn apply_membership_changes(
+    client: &mut Client,
+    tag_id: i64,
+    changes: &TagMembershipChanges,
+) -> Result<(), String> {
+    get(client, tag_id).await?;
+    let tx = client
+        .transaction()
+        .await
+        .map_err(|e| format!("Couldn't start tag update: {e}"))?;
+    tx.execute(
+        "DELETE FROM item_tags WHERE tag_id = $1 AND item_id = ANY($2)",
+        &[&tag_id, &changes.remove_item_ids],
+    )
+    .await
+    .map_err(|e| format!("Couldn't untag items: {e}"))?;
+    tx.execute(
+        "DELETE FROM recipe_tags WHERE tag_id = $1 AND recipe_id = ANY($2)",
+        &[&tag_id, &changes.remove_recipe_ids],
+    )
+    .await
+    .map_err(|e| format!("Couldn't untag recipes: {e}"))?;
+    tx.execute(
+        "INSERT INTO item_tags (item_id, tag_id)
+         SELECT unnest($2::bigint[]), $1 ON CONFLICT DO NOTHING",
+        &[&tag_id, &changes.add_item_ids],
+    )
+    .await
+    .map_err(|e| format!("Couldn't tag items: {e}"))?;
+    tx.execute(
+        "INSERT INTO recipe_tags (recipe_id, tag_id)
+         SELECT unnest($2::bigint[]), $1 ON CONFLICT DO NOTHING",
+        &[&tag_id, &changes.add_recipe_ids],
+    )
+    .await
+    .map_err(|e| format!("Couldn't tag recipes: {e}"))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("Couldn't save tag changes: {e}"))
 }

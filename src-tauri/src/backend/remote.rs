@@ -18,7 +18,7 @@ use crate::db::recipes::Recipe;
 use crate::db::shopping_list_items::{OmissionReport, ShoppingListLine};
 use crate::db::shopping_lists::ShoppingList;
 use crate::db::skus::StoredSku;
-use crate::db::tags::Tag;
+use crate::db::tags::{Tag, TagMembershipChanges};
 use crate::woolworths::Sku;
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
@@ -97,6 +97,18 @@ impl RemoteBackend {
             .await
             .map_err(|e| format!("Couldn't reach remote server: {e}"))?;
         Self::body(resp).await
+    }
+
+    async fn patch_unit<B: Serialize + ?Sized>(&self, path: &str, body: &B) -> Result<(), String> {
+        let resp = self
+            .client
+            .patch(self.url(path))
+            .bearer_auth(&self.token)
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| format!("Couldn't reach remote server: {e}"))?;
+        Self::empty_body(resp).await
     }
 
     async fn put<B: Serialize + ?Sized, T: DeserializeOwned>(
@@ -225,6 +237,16 @@ impl TagsBackend for RemoteBackend {
     }
     async fn set_tag_emoji(&self, tag_id: i64, emoji: Option<&str>) -> Result<Tag, String> {
         self.patch(&format!("/tags/{tag_id}/emoji"), &json!({ "emoji": emoji })).await
+    }
+    async fn rename_tag(&self, tag_id: i64, name: &str) -> Result<Tag, String> {
+        self.patch(&format!("/tags/{tag_id}/name"), &json!({ "name": name })).await
+    }
+    async fn apply_tag_changes(
+        &self,
+        tag_id: i64,
+        changes: &TagMembershipChanges,
+    ) -> Result<(), String> {
+        self.patch_unit(&format!("/tags/{tag_id}/members"), changes).await
     }
     async fn list_tags_for_recipe(&self, recipe_id: i64) -> Result<Vec<Tag>, String> {
         self.get(&format!("/recipes/{recipe_id}/tags")).await

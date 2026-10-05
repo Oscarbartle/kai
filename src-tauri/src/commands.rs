@@ -300,6 +300,29 @@ pub async fn update_recipe_source_url(
     backend.update_recipe_source_url(recipe_id, &source_url).await
 }
 
+/// Renames a tag everywhere it is used (Pantry and Recipe Book share one
+/// tag table). A name that already belongs to another tag is an error.
+#[tauri::command]
+pub async fn rename_tag(
+    backend: State<'_, ActiveBackend>,
+    tag_id: i64,
+    name: String,
+) -> Result<tags::Tag, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.rename_tag(tag_id, &name).await
+}
+
+/// Tags/untags many items and recipes with one tag in a single batch.
+#[tauri::command]
+pub async fn apply_tag_changes(
+    backend: State<'_, ActiveBackend>,
+    tag_id: i64,
+    changes: tags::TagMembershipChanges,
+) -> Result<(), String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.apply_tag_changes(tag_id, &changes).await
+}
+
 #[tauri::command]
 pub async fn list_tags_for_recipe(
     backend: State<'_, ActiveBackend>,

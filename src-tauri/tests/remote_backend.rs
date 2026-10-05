@@ -119,6 +119,50 @@ async fn remote_backend_round_trips_against_a_real_server() {
         .add_item_to_recipe(soup.id, onion.id)
         .await
         .expect("link onion to recipe");
+
+    // --- Bulk tag edits: rename (and its clash refusal) + batch membership ---
+    let garlic = remote.create_item("Garlic").await.expect("create garlic");
+    let other_tag = remote.add_tag_to_item(garlic.id, "Greens").await.expect("other tag");
+    let renamed = remote.rename_tag(tag.id, "Fresh Produce").await.expect("rename tag");
+    assert_eq!(renamed.id, tag.id);
+    assert_eq!(renamed.name, "Fresh Produce");
+    let clash = remote.rename_tag(tag.id, "greens").await.expect_err("clash must be refused");
+    assert!(clash.contains("already exists"), "server's real message should surface: {clash}");
+
+    remote
+        .apply_tag_changes(
+            tag.id,
+            &kai_shared::tags::TagMembershipChanges {
+                add_item_ids: vec![garlic.id],
+                remove_item_ids: vec![onion.id],
+                add_recipe_ids: vec![soup.id],
+                remove_recipe_ids: vec![],
+            },
+        )
+        .await
+        .expect("apply tag changes");
+    let onion_tags = remote.list_tags_for_item(onion.id).await.unwrap();
+    assert!(!onion_tags.iter().any(|t| t.id == tag.id), "untagged");
+    let garlic_tags = remote.list_tags_for_item(garlic.id).await.unwrap();
+    assert!(garlic_tags.iter().any(|t| t.id == tag.id && t.name == "Fresh Produce"), "tagged, new name");
+    assert!(remote.list_tags_for_recipe(soup.id).await.unwrap().iter().any(|t| t.id == tag.id));
+
+    // A bad id anywhere rolls the whole batch back (Postgres transaction).
+    let bad = remote
+        .apply_tag_changes(
+            tag.id,
+            &kai_shared::tags::TagMembershipChanges {
+                add_item_ids: vec![onion.id, 999_999],
+                ..Default::default()
+            },
+        )
+        .await;
+    assert!(bad.is_err());
+    assert!(
+        !remote.list_tags_for_item(onion.id).await.unwrap().iter().any(|t| t.id == tag.id),
+        "onion must not have been tagged by the failed batch"
+    );
+    let _ = other_tag;
     let ingredient = remote
         .set_recipe_item_quantity(soup.id, onion.id, Some(200.0), Some("g"))
         .await

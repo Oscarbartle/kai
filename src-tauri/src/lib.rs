@@ -52,6 +52,8 @@ pub fn run() {
             commands::add_tag_to_item,
             commands::remove_tag_from_item,
             commands::set_tag_emoji,
+            commands::rename_tag,
+            commands::apply_tag_changes,
             commands::create_recipe,
             commands::list_recipes,
             commands::update_recipe_name,
