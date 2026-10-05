@@ -765,6 +765,43 @@ pub async fn test_remote_connection(url: String, token: String) -> Result<String
     }
 }
 
+/// Settings → Backup → "Export data": downloads the shared server's whole
+/// database as a zip and saves it, timestamped, into the Downloads folder.
+/// Returns the saved path. Server only — in Local mode there is no server
+/// to back up, and the app's own SQLite data isn't covered.
+#[tauri::command]
+pub async fn export_backup(
+    app: tauri::AppHandle,
+    local_conn: State<'_, crate::backend::LocalConn>,
+) -> Result<String, String> {
+    // Read the saved config in its own block: the lock must not be held
+    // across the awaits below.
+    let config = {
+        let conn = local_conn.lock().map_err(|e| e.to_string())?;
+        crate::db::settings::get_backend_config(&conn)?
+    };
+    if config.mode != "remote" {
+        return Err("Export backs up the shared server — switch to Remote mode first".to_string());
+    }
+    let url = config
+        .remote_url
+        .filter(|u| !u.trim().is_empty())
+        .ok_or("No server URL is saved — set one under Remote server first")?;
+    let token = config.remote_token.unwrap_or_default();
+
+    let bytes = crate::backup::download_backup(&url, &token).await?;
+    let dir = app
+        .path()
+        .download_dir()
+        .map_err(|e| format!("Couldn't find your Downloads folder: {e}"))?;
+    let path = crate::backup::write_unique(
+        &dir,
+        &crate::backup::backup_filename(chrono::Local::now()),
+        &bytes,
+    )?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// Opens (or focuses) the real Woolworths cart page in its own app
 /// window. Shares the app's WebView2 profile with the login window, so
 /// it opens already signed in. Always local-device-only.

@@ -26,6 +26,7 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 reqwest = { version = "0.12", features = ["json"] }
 rusqlite_migration = "2.6.0"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
@@ -38,4 +39,5 @@ kai-server = { path = "../crates/kai-server" }
 postgresql_embedded = "0.21.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 axum = "0.8.9"
+zip = { version = "4.6", default-features = false, features = ["deflate"] }
 

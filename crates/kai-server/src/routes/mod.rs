@@ -1,3 +1,4 @@
+mod export;
 mod health;
 mod items;
 mod overview;
@@ -26,6 +27,7 @@ pub fn build(state: AppState, shared_token: String) -> Router {
     let protected = Router::new()
         .merge(items::router())
         .merge(overview::router())
+        .merge(export::router())
         .merge(skus::router())
         .merge(tags::router())
         .merge(recipes::router())

@@ -78,7 +78,7 @@ async fn remote_backend_round_trips_against_a_real_server() {
         axum::serve(listener, app).await.unwrap();
     });
 
-    let remote = RemoteBackend::new(format!("http://{addr}"), token);
+    let remote = RemoteBackend::new(format!("http://{addr}"), token.clone());
 
     // --- Items ---
     let onion = remote.create_item("Onion").await.expect("create item");
@@ -228,6 +228,22 @@ async fn remote_backend_round_trips_against_a_real_server() {
     let updated = remote.set_delivery_fee(20.0).await.expect("set delivery fee");
     assert_eq!(updated, 20.0);
     assert_eq!(remote.get_delivery_fee().await.expect("re-read fee"), 20.0);
+
+    // --- Settings → Backup: the desktop's download against the real
+    //     server, while the data above still exists ---
+    let zip_bytes = kai_lib::backup::download_backup(&format!("http://{addr}/"), &token)
+        .await
+        .expect("download the backup");
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).expect("a real zip");
+    let mut items_json = String::new();
+    std::io::Read::read_to_string(&mut archive.by_name("items.json").expect("items.json"), &mut items_json)
+        .unwrap();
+    assert!(items_json.contains("\"Onion\""), "the export should contain the real data");
+    assert!(archive.by_name("manifest.json").is_ok());
+    let rejected = kai_lib::backup::download_backup(&format!("http://{addr}"), "wrong-token")
+        .await
+        .unwrap_err();
+    assert!(rejected.contains("rejected the token"), "{rejected}");
 
     // --- Cleanup, then confirm the guard: a still-linked item can't be
     //     deleted, but the error text comes back through intact ---

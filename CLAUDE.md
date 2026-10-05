@@ -311,6 +311,65 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
   constant, changeable here since real delivery pricing can vary by
   address/timeslot.
 
+## Backup / export — implemented (export only, no restore)
+
+- **Settings → Backup → "Export data"** downloads the shared server's whole
+  database as a zip, saved straight into the Downloads folder as
+  `kai-backup-2026-10-06_14-32-05.zip` (the user's *local* time, to the
+  second; if that name is taken it becomes `-2`, `-3`, … — an existing
+  backup is never overwritten), then shows the path and a "Show in
+  folder" button (`revealItemInDir`, capability
+  `opener:allow-reveal-item-in-dir`). No Save-As dialog — that would need
+  a new Tauri plugin for a click the user didn't ask for.
+- **Server only, by decision.** The button is disabled with an
+  explanation in Local mode; the app's own SQLite data is *not* covered.
+  The Tauri command `export_backup` refuses unless the saved mode is
+  remote with a saved URL, and it reads the config straight from the
+  local settings table (like `test_remote_connection`, not through the
+  `Backend` trait — export is not a data operation both backends share).
+- **The server builds the zip**: `GET /export` (token-protected, like
+  everything but `/health`), `Cache-Control: no-store`,
+  `crates/kai-server/src/routes/export.rs` + `db/export.rs`. Inside:
+  `manifest.json` (format 1, `exported_at` UTC, server version, row count
+  per table) and one pretty-printed `<table>.json` per table, **all ten**
+  (`items, skus, tags, item_tags, recipes, recipe_items, recipe_tags,
+  shopping_lists, shopping_list_items, settings`), each a list of rows
+  with their original ids so every relationship survives.
+  - Postgres makes the JSON itself (`jsonb_agg(to_jsonb(t) ORDER BY …)`),
+    so a column added by a future migration is exported with no code
+    change. **A new *table* must be added to `db::export::TABLES`** — the
+    integration test asserts every table is in the manifest, so
+    forgetting fails loudly.
+  - All tables are read in **one `REPEATABLE READ` read-only
+    transaction**: one consistent snapshot even if someone edits while it
+    runs (no list line pointing at an item deleted a moment earlier).
+  - **Holds no secrets**: the shared token is in the server's
+    environment, not the database; images are links, not files. So a
+    backup is safe to keep around, but it is still all of the household's
+    data.
+  - Built in memory — the whole database is a few MB at most.
+- **Format decision**: JSON per table rather than a `pg_dump` SQL file
+  (would need `pg_dump` in the server image and is useless without
+  Postgres) or CSV (flattens the images/allergens lists). JSON is
+  readable, portable, and easy to load back with a script.
+- **No restore, deliberately.** Overwriting live data is a separate, much
+  riskier feature than reading it. Until it exists a backup is restorable
+  by script (ids, links and timestamps are all in the files), not by a
+  button.
+- **A server from before this existed** has no `/export`; its static-file
+  handler answers 404/405, which the app turns into "This server is too
+  old to export — update it" instead of a bare status. So the desktop
+  needs the server redeployed before the button works.
+- Verified: `thin_client.rs` against real Postgres (401 without a token,
+  zip headers, every table present, real rows and ids, the Onion↔Veg
+  link, timestamps as strings, empty tables as `[]`);
+  `remote_backend.rs` runs the desktop's actual `download_backup` against
+  a real server (contents, and a wrong token's error); unit tests for the
+  zip layout, the filename, and never-overwrite. **Not looked at in the
+  real window**: the Settings section itself (its updater/version calls
+  need the real Tauri runtime, so it couldn't be driven in a browser) and
+  the actual save into the Downloads folder.
+
 ## Windows dev environment notes
 
 - `tauri dev` opening a blank window for ~25-30s before content appears (on

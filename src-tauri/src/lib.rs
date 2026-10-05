@@ -4,6 +4,7 @@
 // real embedded Postgres + a real `kai-server` beats mocking the HTTP
 // layer here.
 pub mod backend;
+pub mod backup;
 mod commands;
 pub mod db;
 mod woolworths;
@@ -93,6 +94,7 @@ pub fn run() {
             commands::set_backend_mode,
             commands::set_remote_config,
             commands::test_remote_connection,
+            commands::export_backup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

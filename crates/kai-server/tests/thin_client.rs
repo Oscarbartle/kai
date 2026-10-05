@@ -83,6 +83,7 @@ async fn static_app_and_bulk_endpoints() {
     assert_eq!(http.get(format!("{base}/pantry")).send().await.unwrap().status(), 401);
     assert_eq!(http.get(format!("{base}/recipe-book")).send().await.unwrap().status(), 401);
     assert_eq!(http.get(format!("{base}/shopping")).send().await.unwrap().status(), 401);
+    assert_eq!(http.get(format!("{base}/export")).send().await.unwrap().status(), 401);
 
     // --- An unknown path is a 404, not index.html with a 200 ---
     assert_eq!(http.get(format!("{base}/definitely-not-a-thing")).send().await.unwrap().status(), 404);
@@ -144,6 +145,49 @@ async fn static_app_and_bulk_endpoints() {
     assert_eq!(weekly_entry["lines"][0]["unit"], "count");
     let empty_entry = lists.iter().find(|l| l["list"]["name"] == "Empty").expect("Empty list");
     assert!(empty_entry["lines"].as_array().unwrap().is_empty());
+
+    // --- /export: the whole database as a zip, behind the token ---
+    let export = http.get(format!("{base}/export")).bearer_auth(token).send().await.unwrap();
+    assert_eq!(export.status(), 200);
+    assert_eq!(export.headers()["content-type"], "application/zip");
+    let disposition = export.headers()["content-disposition"].to_str().unwrap().to_string();
+    assert!(
+        disposition.starts_with("attachment; filename=\"kai-backup-") && disposition.ends_with(".zip\""),
+        "{disposition}"
+    );
+    assert_eq!(export.headers()["cache-control"], "no-store");
+    let bytes = export.bytes().await.unwrap();
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec())).expect("a real zip");
+    let mut read = |name: &str| -> Value {
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut archive.by_name(name).unwrap_or_else(|_| panic!("{name} missing")), &mut text)
+            .unwrap();
+        serde_json::from_str(&text).unwrap()
+    };
+    let manifest = read("manifest.json");
+    assert_eq!(manifest["format"], 1);
+    assert_eq!(manifest["row_counts"]["items"], 2);
+    assert_eq!(manifest["row_counts"]["recipes"], 1);
+    assert_eq!(manifest["row_counts"]["shopping_list_items"], 1);
+    assert_eq!(manifest["row_counts"]["skus"], 0, "empty tables are still exported, as empty lists");
+    // Every table the database has is in the export — a table added by a
+    // future migration but forgotten in db::export::TABLES must fail here.
+    for table in ["items", "skus", "tags", "item_tags", "recipes", "recipe_items", "recipe_tags",
+                  "shopping_lists", "shopping_list_items", "settings"] {
+        assert!(manifest["row_counts"].get(table).is_some(), "{table} missing from the manifest");
+        assert!(read(&format!("{table}.json")).is_array(), "{table}.json is not a list");
+    }
+    // Real rows, with their original ids, so relationships survive.
+    let exported_items = read("items.json");
+    let onion_row = exported_items.as_array().unwrap().iter().find(|r| r["name"] == "Onion").expect("Onion");
+    assert_eq!(onion_row["id"], onion.id);
+    let item_tags = read("item_tags.json");
+    assert_eq!(item_tags[0]["item_id"], onion.id, "the Onion↔Veg link must carry both ids");
+    assert_eq!(read("recipe_items.json")[0]["amount"], 2.0);
+    assert_eq!(read("shopping_list_items.json")[0]["item_id"], onion.id);
+    assert_eq!(read("tags.json")[0]["name"], "Veg");
+    // Postgres' own types come through as plain JSON: timestamps as strings.
+    assert!(onion_row["created_at"].as_str().unwrap().contains('T'));
 
     std::fs::remove_dir_all(&dir).ok();
     postgresql.stop().await.ok();

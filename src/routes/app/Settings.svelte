@@ -5,6 +5,7 @@
 -->
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
+	import { revealItemInDir } from '@tauri-apps/plugin-opener';
 	import { getVersion } from '@tauri-apps/api/app';
 	import { check, type Update } from '@tauri-apps/plugin-updater';
 	import { relaunch } from '@tauri-apps/plugin-process';
@@ -219,6 +220,35 @@
 			remoteToken = config.remote_token ?? '';
 		} catch (e) {
 			remoteConfigError = String(e);
+		}
+	}
+
+	// Settings → Backup. The server builds the zip; the app saves it into
+	// Downloads and reports where, with a way to open that folder.
+	type ExportStatus = 'idle' | 'exporting' | 'done' | 'error';
+	let exportStatus: ExportStatus = $state('idle');
+	let exportedPath: string | null = $state(null);
+	let exportError: string | null = $state(null);
+
+	async function exportData() {
+		exportStatus = 'exporting';
+		exportError = null;
+		exportedPath = null;
+		try {
+			exportedPath = await invoke<string>('export_backup');
+			exportStatus = 'done';
+		} catch (e) {
+			exportError = String(e);
+			exportStatus = 'error';
+		}
+	}
+
+	async function showExported() {
+		if (!exportedPath) return;
+		try {
+			await revealItemInDir(exportedPath);
+		} catch (e) {
+			exportError = String(e);
 		}
 	}
 
@@ -464,6 +494,40 @@
 
 		{#if remoteConfigError}
 			<p class="error">{remoteConfigError}</p>
+		{/if}
+	</section>
+
+	<section class="setting-block">
+		<h2>Backup</h2>
+		<p class="blurb">
+			Saves everything on the shared server — items, SKUs, tags, recipes and shopping lists — as a
+			timestamped zip in your Downloads folder. Each table is a plain JSON file inside it. This
+			backs up the server, not data kept only on this device.
+		</p>
+
+		<div class="status-row">
+			<button
+				class="secondary"
+				onclick={exportData}
+				disabled={backendMode !== 'remote' || exportStatus === 'exporting'}
+			>
+				{exportStatus === 'exporting' ? 'Exporting…' : 'Export data'}
+			</button>
+			{#if exportStatus === 'done' && exportedPath}
+				<button class="secondary" onclick={showExported}>Show in folder</button>
+			{/if}
+		</div>
+
+		{#if backendMode !== 'remote'}
+			<p class="hint">Switch to Remote above to export — there is no server to back up in Local mode.</p>
+		{/if}
+
+		{#if exportStatus === 'done' && exportedPath}
+			<p class="hint">Saved to {exportedPath}</p>
+		{/if}
+
+		{#if exportError}
+			<p class="error">{exportError}</p>
 		{/if}
 	</section>
 </div>
