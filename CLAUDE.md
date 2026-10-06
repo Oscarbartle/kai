@@ -22,13 +22,12 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
 
 ## Project state
 
-- `main` — the old Python/PySide6 app, full history preserved, not being
-  developed further. Reference it for prior art (see below) but don't build
-  on it.
-- `v2` — active branch. Tauri + Svelte + TS shell with a working SQLite-backed
-  Item/SKU/tag/Recipe system (see below) — a functional slice, not just
-  scaffolding. UI is intentionally minimal/undesigned so far ("build the
-  functions, style it later" — explicit call, not neglect).
+- `main` — the active branch: the Tauri + Svelte + TS + Rust app (formerly
+  "v2"), released as v0.4.x for Windows and macOS (Apple Silicon). Branch
+  off `main` for all work and merge back via PR.
+- The old Python/PySide6 app is no longer on any branch tip — it lives in
+  history, tagged `python-v1-final`. Reference it for prior art (see below)
+  but don't build on it.
 
 ## Architecture direction
 
@@ -173,7 +172,7 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
   now `Settings.svelte`'s account section + `CartAdd.svelte` in `/app` —
   see both below). Cart-add is `POST /api/v1/trolleys/my/items`
   with `{"sku", "quantity", "pricingUnit"}` — the request shape is confirmed
-  from v1's already-working code (`git show main:kai/core/woolworths_cart.py`)
+  from v1's already-working code (`git show python-v1-final:kai/core/woolworths_cart.py`)
   for `pricingUnit: "Each"`. **`"Kg"` for weight-based SKUs is a same-pattern
   extrapolation, not verified against the real API** — v1 never sent it.
   Also confirmed directly (curl, zero cookies): the endpoint hard-401s with
@@ -848,7 +847,9 @@ items the review saves directly, as in slice 2.
   cart exists. Not needed for read-only product data. See "Woolworths
   cart interaction — implemented" above for how auth is actually sourced.
 
-## Prior art worth referencing (on `main`, not carried forward as code)
+## Prior art worth referencing (at tag `python-v1-final`, not carried forward as code)
+
+Read with `git show python-v1-final:<path>`.
 
 - `kai/objects/item.py` — old Item model: name, stock_code, cached
   `online_data`, tags, is_long_term, sold_by_weight, default_weight_kg.
@@ -1418,7 +1419,7 @@ items the review saves directly, as in slice 2.
     writing the UI around them, not by a test.
 - **Stage 6 — done. Deployed to the Unraid box.** `docker compose up -d
   --build` from `crates/kai-server` (repo at `/mnt/user/appdata/kai/repo`,
-  branch `v2`), reachable through the Cloudflare Tunnel at
+  branch `main`), reachable through the Cloudflare Tunnel at
   `https://kai.oserver.pro`, with the desktop app connected via Settings →
   Remote server. Redeploying is `git pull && docker compose up -d --build`
   (a warm-cache rebuild took about a minute). What the real deploy
