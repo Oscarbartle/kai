@@ -496,8 +496,10 @@ attach a SKU. A fixed list of supported sites is fine.
   "Preview only — nothing has been saved yet." and saves nothing.
 - **The supported-sites list lives in one place**,
   `recipe_import::SUPPORTED_SITES` (Rust: name, domains, a real example
-  URL), and the dialog shows it (as clickable chips that fill in the
-  example link) via the `list_supported_recipe_sites` command — so what the
+  URL), and the dialog shows it (as chips that **open that site in
+  the user's own browser** — `openUrl` on the origin of its example link,
+  allowed by `opener:default` — so the user can browse for a recipe and paste
+  its link; they used to fill in the example link, changed at Oscar's request) via the `list_supported_recipe_sites` command — so what the
   user sees is exactly what the importer accepts. **To add a site**: probe
   it with real recipe pages, add an entry with a real `example_url`, run
   `cargo test -p kai --lib live_ -- --ignored` (it fetches every listed

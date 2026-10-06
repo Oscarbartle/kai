@@ -11,6 +11,7 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
 	import { onMount } from 'svelte';
+	import { openUrl } from '@tauri-apps/plugin-opener';
 	import ItemPicker from './ItemPicker.svelte';
 	import NewItemWizard, { type WizItem } from './NewItemWizard.svelte';
 
@@ -99,6 +100,17 @@
 			error = String(e);
 		}
 	});
+
+	// A site chip takes you to that site, in your own browser, to find a recipe;
+	// you then paste its link here. (The site's front page, taken from its
+	// example link so it is always an address known to work.)
+	async function openSite(site: SupportedSite) {
+		try {
+			await openUrl(`${new URL(site.example_url).origin}/`);
+		} catch (e) {
+			error = `Couldn't open ${site.name}: ${String(e)}`;
+		}
+	}
 
 	async function fetchPreview() {
 		if (!url.trim() || status === 'loading') return;
@@ -389,15 +401,19 @@
 				{#each sites as site (site.name)}
 					<button
 						class="site"
-						title="Fill in an example link from {site.domains[0]}"
-						onclick={() => (url = site.example_url)}
+						title="Open {site.name} in your browser to find a recipe"
+						onclick={() => openSite(site)}
 					>
 						{site.name}
 						<span class="domain">{site.domains[0]}</span>
 						{#if site.note}<span class="site-note">· {site.note}</span>{/if}
+						<span class="out" aria-hidden="true">↗</span>
 					</button>
 				{/each}
-				<span class="sites-note">More can be added once they've been checked.</span>
+				<span class="sites-note">
+					Click a site to browse it in your browser, then paste a recipe's link above. More can be added once
+					they've been checked.
+				</span>
 			</div>
 
 			{#if error}
@@ -727,6 +743,12 @@
 		color: #999;
 		font-weight: normal;
 		margin-left: 0.3rem;
+	}
+
+	.out {
+		color: #999;
+		margin-left: 0.3rem;
+		font-weight: normal;
 	}
 
 	.site-note {
