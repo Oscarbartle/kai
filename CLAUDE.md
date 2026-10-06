@@ -401,8 +401,8 @@ attach a SKU. A fixed list of supported sites is fine.
   per-site scrapers. Confirmed with real recipe pages: **RecipeTin Eats,
   BBC Good Food, Serious Eats, Simply Recipes, Minimalist Baker, King
   Arthur, Epicurious, Bon Appetit, Chelsea Sugar (NZ)**, and **Edmonds
-  (NZ)** (has ingredients, but its data lacked steps and servings in the
-  page tried) — all found with a *script*, not yet through the app's own
+  (NZ)** (its structured data lacks the steps and servings, but the page
+  shows the method — see "Edmonds" below) — all found with a *script*, not yet through the app's own
   fetcher. Oscar's chosen starting list was RecipeTin Eats, BBC Good
   Food and Serious Eats (Jamie Oliver works but he skipped it) — see
   "Slice 1" below for what survived.
@@ -511,9 +511,7 @@ attach a SKU. A fixed list of supported sites is fine.
   are rejected (tested).
 - **Currently supported (each verified live through the app's own fetcher,
   2026-10-06): RecipeTin Eats, BBC Good Food, Chelsea Sugar (NZ), Edmonds
-  (NZ — ingredients only, its pages carry no method, so the list shows
-  "ingredients only, no method" beside it via `SupportedSite::note`),
-  Minimalist Baker, King Arthur Baking, Epicurious, Bon Appetit.** (Added in
+  (NZ — **method read from the page's HTML**, see below), Minimalist Baker, King Arthur Baking, Epicurious, Bon Appetit.** (Added in
   slice 4; the first two were the original pair.) Run
   `cargo test -p kai --lib live_ -- --ignored --nocapture` to recheck them
   all and print each site's whole review.
@@ -537,7 +535,25 @@ attach a SKU. A fixed list of supported sites is fine.
   entities (`&amp;`, `&#8211;`, `&nbsp;`) cleaned from every text field,
   block tags becoming line breaks. A page with no recipe, no title or no
   ingredients gives a specific error. A recipe with *no method* is
-  allowed (Edmonds' page had none) and the preview says so.
+  allowed and the preview says so.
+- **Per-site method fallback — added for Edmonds, at Oscar's challenge.**
+  Edmonds' JSON-LD recipe has the ingredients but **no `recipeInstructions`**
+  (and its other two data blocks are breadcrumbs and an FAQ, both with
+  trailing commas, i.e. invalid JSON — ignored), but the page shows the
+  method: `<p class="basic-title">Method</p>` followed by `<div
+  class="wysiwyg"><ol><li>…`. I had first written it off as "no method"
+  after looking only at the structured data; reading the page showed it was
+  there (and that the odd "º" seen in a terminal was just console encoding —
+  the page is valid UTF-8). `SupportedSite::method_marker` holds the HTML
+  that precedes the method's list; when the data has no steps, the first
+  `<ol>`/`<ul>` within 1500 bytes after it becomes the steps (tags and
+  entities cleaned, empty items dropped, an unclosed `<li>` ends at the next
+  one). **Per site on purpose** — a generic "find the numbered list" rule
+  would grab the wrong list on other sites. It never overrides steps from the
+  structured data, and no marker/no nearby list simply means "no method", not
+  an error. Edmonds still has no servings (not in its data; not in a place
+  looked at). The `note` field remains for any future site with a limitation
+  worth stating.
 - **Tests**: 12 offline unit tests (the shapes above, URL matching, and
   that every listed site's example routes back to itself with unique
   domains) plus the `#[ignore]`d live test. **The dialog was exercised
@@ -743,7 +759,8 @@ items the review saves directly, as in slice 2.
     safely saved and its failure is ignored; reading aliases falls back to
     "none" — so a **desktop app newer than its server** (no `/ingredient-
     aliases` route yet) simply remembers nothing until the server is rebuilt.
-- **More supported sites**: see Slice 1 above (6 added, Edmonds with its note).
+- **More supported sites**: see Slice 1 above (6 added; Edmonds' method comes
+  from the page's HTML via a per-site marker).
 - **Wizard touches**, all on the new item only and all sent with the one
   create call, rolled back with everything else:
   - **Preferred product (★)**: shown once two or more products are picked;

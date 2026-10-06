@@ -29,8 +29,14 @@ pub struct SupportedSite {
     pub domains: &'static [&'static str],
     pub example_url: &'static str,
     /// A known limitation worth telling the user about, shown beside the
-    /// site ("no method"); `None` for a site that imports everything.
+    /// site; `None` for a site that imports everything.
     pub note: Option<&'static str>,
+    /// For a site whose structured data has no method steps but whose page
+    /// shows them: the HTML that immediately precedes the method's list
+    /// (e.g. its "Method" heading). The first list after it is used as the
+    /// steps. Per site on purpose — a guess-the-numbered-list rule would grab
+    /// the wrong thing on other sites.
+    pub method_marker: Option<&'static str>,
 }
 
 pub const SUPPORTED_SITES: &[SupportedSite] = &[
@@ -39,50 +45,58 @@ pub const SUPPORTED_SITES: &[SupportedSite] = &[
         domains: &["recipetineats.com"],
         example_url: "https://www.recipetineats.com/thai-red-curry/",
         note: None,
+        method_marker: None,
     },
     SupportedSite {
         name: "BBC Good Food",
         domains: &["bbcgoodfood.com"],
         example_url: "https://www.bbcgoodfood.com/recipes/easy-pancakes",
         note: None,
+        method_marker: None,
     },
     SupportedSite {
         name: "Chelsea Sugar",
         domains: &["chelsea.co.nz"],
         example_url: "https://www.chelsea.co.nz/recipes/browse-recipes/banana-cake-chocolate-icing",
         note: None,
+        method_marker: None,
     },
     SupportedSite {
         name: "Edmonds",
         domains: &["edmondscooking.co.nz"],
         example_url: "https://edmondscooking.co.nz/recipes/cakes/banana-cake",
-        // Its pages carry the ingredients but not the method, so the
-        // method has to be typed in afterwards.
-        note: Some("ingredients only, no method"),
+        // The structured data has the ingredients but no steps; the page
+        // itself shows the method in a list under a "Method" heading.
+        note: None,
+        method_marker: Some(r#"<p class="basic-title">Method</p>"#),
     },
     SupportedSite {
         name: "Minimalist Baker",
         domains: &["minimalistbaker.com"],
         example_url: "https://minimalistbaker.com/honey-almond-snack-cake/",
         note: None,
+        method_marker: None,
     },
     SupportedSite {
         name: "King Arthur Baking",
         domains: &["kingarthurbaking.com"],
         example_url: "https://www.kingarthurbaking.com/recipes/cinnamon-roll-cake-recipe",
         note: None,
+        method_marker: None,
     },
     SupportedSite {
         name: "Epicurious",
         domains: &["epicurious.com"],
         example_url: "https://www.epicurious.com/recipes/food/views/diner-style-buttermilk-pancakes",
         note: None,
+        method_marker: None,
     },
     SupportedSite {
         name: "Bon Appetit",
         domains: &["bonappetit.com"],
         example_url: "https://www.bonappetit.com/recipe/rice-krispies-treats",
         note: None,
+        method_marker: None,
     },
 ];
 
@@ -190,7 +204,77 @@ pub async fn preview_from_url(url: &str) -> Result<RecipeDraft, String> {
     let url = url.trim();
     let site = site_for_url(url)?;
     let html = fetch_page(url).await?;
-    parse_recipe_page(&html, url, site.name)
+    parse_recipe_page_for(&html, url, site)
+}
+
+/// Reads a page for a known site: the structured data first, and — only when
+/// that has no method steps and the site says where its method is — the steps
+/// from the page's own HTML.
+pub fn parse_recipe_page_for(html: &str, source_url: &str, site: &SupportedSite) -> Result<RecipeDraft, String> {
+    let mut draft = parse_recipe_page(html, source_url, site.name)?;
+    if draft.steps.is_empty() {
+        if let Some(marker) = site.method_marker {
+            draft.steps = steps_from_html(html, marker);
+        }
+    }
+    Ok(draft)
+}
+
+/// How far after the marker the list may start. The method sits right under
+/// its heading; a list far away is some other part of the page.
+const LIST_MAX_DISTANCE: usize = 1500;
+
+/// The items of the first `<ol>`/`<ul>` that follows `marker` in `html`,
+/// as plain text, one step each. Empty if the marker or a nearby list isn't
+/// there — which just means "no method found", never an error.
+fn steps_from_html(html: &str, marker: &str) -> Vec<String> {
+    let Some(at) = html.find(marker) else {
+        return Vec::new();
+    };
+    let after = &html[at + marker.len()..];
+    // ASCII lowercasing keeps byte offsets identical to `after`.
+    let lower = after.to_ascii_lowercase();
+    let ol = lower.find("<ol");
+    let ul = lower.find("<ul");
+    let (open, close_tag) = match (ol, ul) {
+        (Some(o), Some(u)) if o < u => (o, "</ol"),
+        (Some(_), Some(u)) => (u, "</ul"),
+        (Some(o), None) => (o, "</ol"),
+        (None, Some(u)) => (u, "</ul"),
+        (None, None) => return Vec::new(),
+    };
+    if open > LIST_MAX_DISTANCE {
+        return Vec::new();
+    }
+    let Some(end) = lower[open..].find(close_tag).map(|i| open + i) else {
+        return Vec::new();
+    };
+
+    let list = &after[open..end];
+    let list_lower = &lower[open..end];
+    let mut steps = Vec::new();
+    let mut from = 0;
+    while let Some(li) = list_lower[from..].find("<li") {
+        let tag_start = from + li;
+        let Some(tag_end) = list_lower[tag_start..].find('>').map(|i| tag_start + i) else {
+            break;
+        };
+        // An item ends at its </li>, or where the next <li> starts if it was
+        // never closed — whichever comes first.
+        let rest = &list_lower[tag_end..];
+        let body_end = match (rest.find("</li"), rest.find("<li")) {
+            (Some(a), Some(b)) => tag_end + a.min(b),
+            (Some(a), None) => tag_end + a,
+            (None, Some(b)) => tag_end + b,
+            (None, None) => list.len(),
+        };
+        let text = inline_text(&list[tag_end + 1..body_end]);
+        if !text.is_empty() {
+            steps.push(text);
+        }
+        from = body_end.max(tag_end + 1);
+    }
+    steps
 }
 
 // ----------------------------------------------------------------- reading
@@ -605,6 +689,83 @@ mod tests {
             <SCRIPT TYPE="application/LD+JSON" id="b">{"@type":"Recipe","name":"Good","recipeIngredient":["1 egg"]}</SCRIPT>"#;
         let draft = parse_recipe_page(html, "u", "S").unwrap();
         assert_eq!(draft.name, "Good");
+    }
+
+    // ---- a site whose method is in the page, not in its structured data ----
+
+    /// Modelled on the real Edmonds page: a recipe block with ingredients but
+    /// no steps, a breadcrumb block with a trailing comma (invalid JSON), and
+    /// the method as a list under a "Method" heading.
+    const EDMONDS_LIKE: &str = r#"<html><head>
+        <script type="application/ld+json">[{"@type":"BreadcrumbList","itemListElement":[
+            {"@type":"ListItem","position":1,"name":"Recipes"},
+        ]}]</script>
+        <script type="application/ld+json">{"@type":"Recipe","name":"Banana Cake",
+            "recipeIngredient":["125g butter, softened","2 eggs"]}</script></head><body>
+        <div class="recipe-content"><p class="basic-title">Ingredients</p><ul><li>not the method</li></ul></div>
+        <div class="col"><p class="basic-title">Method</p>
+          <div class="wysiwyg">
+            <ol>
+<li>Preheat the oven to 180ºC. Butter the tin.</li>
+<li>Cream the <strong>butter</strong> &amp; sugar until light and fluffy.</li>
+<li>   </li>
+<li>Bake for about 50 minutes.</li>
+            </ol>
+          </div></div>
+        <p class="basic-title">Frequently Asked Questions</p><ol><li>Not a step</li></ol>
+        </body></html>"#;
+
+    fn edmonds() -> &'static SupportedSite {
+        SUPPORTED_SITES.iter().find(|s| s.name == "Edmonds").expect("Edmonds is listed")
+    }
+
+    #[test]
+    fn the_method_is_read_from_the_page_when_the_structured_data_has_none() {
+        let draft = parse_recipe_page_for(EDMONDS_LIKE, "https://edmondscooking.co.nz/x", edmonds()).unwrap();
+        assert_eq!(draft.name, "Banana Cake");
+        assert_eq!(draft.ingredient_lines, ["125g butter, softened", "2 eggs"]);
+        assert_eq!(
+            draft.steps,
+            [
+                "Preheat the oven to 180ºC. Butter the tin.",
+                "Cream the butter & sugar until light and fluffy.",
+                "Bake for about 50 minutes."
+            ],
+            "the list under Method — tags and entities cleaned, the empty item dropped, and not the ingredients \
+             list before it or the FAQ list after it"
+        );
+    }
+
+    #[test]
+    fn the_fallback_never_overrides_the_structured_data_and_needs_a_marker() {
+        // A site with steps in its data keeps them even if it has a marker.
+        let with_steps = EDMONDS_LIKE.replace(
+            r#""recipeIngredient""#,
+            r#""recipeInstructions":["From the data."],"recipeIngredient""#,
+        );
+        let draft = parse_recipe_page_for(&with_steps, "u", edmonds()).unwrap();
+        assert_eq!(draft.steps, ["From the data."]);
+
+        // A site with no marker gets no fallback, whatever the page holds.
+        let no_marker = SupportedSite { method_marker: None, ..*edmonds() };
+        assert!(parse_recipe_page_for(EDMONDS_LIKE, "u", &no_marker).unwrap().steps.is_empty());
+    }
+
+    #[test]
+    fn a_missing_marker_or_a_distant_list_means_no_method_not_a_wrong_one() {
+        let marker = r#"<p class="basic-title">Method</p>"#;
+        assert!(steps_from_html("<p>nothing here</p>", marker).is_empty());
+        assert!(steps_from_html(&format!("{marker}<p>no list at all</p>"), marker).is_empty());
+        let far = format!("{marker}{}<ol><li>an unrelated list</li></ol>", "<p>filler</p>".repeat(200));
+        assert!(steps_from_html(&far, marker).is_empty(), "a list far from the heading is not its method");
+        assert!(steps_from_html(&format!("{marker}<ol><li>never closed"), marker).is_empty());
+    }
+
+    #[test]
+    fn unordered_lists_and_unclosed_items_are_read_too() {
+        let marker = "<h2>Method</h2>";
+        let ul = format!("{marker}<ul><li>One<li>Two</li><LI class=\"x\">Three</LI></ul><ul><li>other</li></ul>");
+        assert_eq!(steps_from_html(&ul, marker), ["One", "Two", "Three"]);
     }
 
     // ---- which URLs belong to a supported site ----
