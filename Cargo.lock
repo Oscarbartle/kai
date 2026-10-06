@@ -2469,6 +2469,7 @@ dependencies = [
  "chrono",
  "kai-server",
  "kai-shared",
+ "libc",
  "postgresql_embedded",
  "reqwest 0.12.28",
  "rusqlite",
