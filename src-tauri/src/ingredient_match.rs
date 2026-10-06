@@ -11,7 +11,12 @@
 //!   `Coriander`);
 //! - one side's words all appear in the other's → a close match, scored by
 //!   how much of the longer name the shorter one covers (`onions` ↔
-//!   `Brown Onion`; `rapeseed or sesame oil` ↔ `Sesame Oil`);
+//!   `Brown Onion`; `rapeseed or sesame oil` ↔ `Sesame Oil`). The *last*
+//!   word names what the thing is ("garlic hummus" is a hummus, "crushed
+//!   garlic" is garlic), so when both names end in the same word the match
+//!   is boosted, and when they don't it is marked down below "check" —
+//!   `garlic` should offer `Crushed Garlic` first and never preselect
+//!   `Garlic Hummus`;
 //! - only the last word in common (`red onion` ↔ `Brown Onion`, `sesame
 //!   oil` ↔ `Olive Oil`) → offered as a suggestion but *not* preselected —
 //!   that is as likely to be the wrong oil as the right onion;
@@ -96,7 +101,12 @@ fn score(ingredient: &[String], item: &[String]) -> f64 {
     if shared == a.len() || shared == b.len() {
         // One name is wholly inside the other.
         let (small, large) = if a.len() < b.len() { (a.len(), b.len()) } else { (b.len(), a.len()) };
-        return 0.6 + 0.3 * (small as f64 / large as f64);
+        let coverage = 0.6 + 0.3 * (small as f64 / large as f64);
+        return if ingredient.last() == item.last() {
+            coverage + 0.05
+        } else {
+            coverage - 0.25
+        };
     }
     let union = a.union(&b).count();
     let overlap = 0.7 * shared as f64 / union as f64;
@@ -179,11 +189,34 @@ mod tests {
         let r = match_ingredient("Onions", &pantry());
         assert_eq!(r.confidence, Confidence::Check);
         assert_eq!(r.suggestions[0].item_id, 1);
-        assert!((r.suggestions[0].score - 0.75).abs() < 1e-9);
+        assert!((r.suggestions[0].score - 0.8).abs() < 1e-9);
 
         assert_eq!(best("Chestnut mushrooms"), (Confidence::Check, Some(9)));
         assert_eq!(best("Rapeseed or sesame oil"), (Confidence::Check, Some(4)));
         assert_eq!(best("Garlic"), (Confidence::Check, Some(8)), "plain garlic vs Crushed Garlic is close, not identical");
+    }
+
+    #[test]
+    fn the_last_word_says_what_a_thing_is() {
+        // Both contain "garlic", but only one *is* garlic.
+        let both = vec![(1, "Garlic Hummus"), (2, "Crushed Garlic")];
+        let r = match_ingredient("Garlic", &both);
+        assert_eq!(r.suggestions[0].item_id, 2, "Crushed Garlic first");
+        assert_eq!(r.confidence, Confidence::Check);
+        assert_eq!(r.suggestions[1].item_id, 1, "the hummus is still offered, lower down");
+        assert!(r.suggestions[1].score < CHECK);
+
+        // With only the hummus in the pantry, nothing is preselected.
+        let only = vec![(1, "Garlic Hummus")];
+        let r = match_ingredient("Garlic", &only);
+        assert_eq!(r.confidence, Confidence::None);
+        assert_eq!(r.suggestions[0].item_id, 1);
+
+        // Same idea in the other direction, and for other foods.
+        let r = match_ingredient("Red onion", &[(1, "Red Onion Chutney"), (2, "Onion")]);
+        assert_eq!(r.suggestions[0].item_id, 2, "an onion beats an onion chutney");
+        let r = match_ingredient("Chicken", &[(1, "Chicken Stock"), (2, "Chicken Thighs")]);
+        assert_eq!(r.confidence, Confidence::None, "chicken is not preselected as stock or as thighs");
     }
 
     #[test]

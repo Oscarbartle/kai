@@ -590,6 +590,27 @@ commands and `RecipeImport.svelte`.
   import created are deleted again** (tested by forcing a real failure
   mid-way) and the error says "Nothing was saved."; items that already
   existed are never touched. Works in local and remote mode (same `Backend`).
+- **Searchable item picker** (`ItemPicker.svelte`, added after Oscar's first
+  real use — a plain `<select>` is no good with hundreds of Pantry items).
+  A button showing the current choice opens a panel with a search box:
+  empty = suggestions, "＋ New item…", "Skip this line", then every item A–Z;
+  typing = items containing every typed word (suggestions first, then names
+  starting with the text), then **"＋ New item “<what you typed>”"** (which
+  becomes the new item's name) and Skip; "No items match" when nothing
+  does. ↑/↓/Enter/Esc work (Esc closes only the picker, not the dialog);
+  click-away, scroll or resize closes it. It is `position: fixed` because
+  the table around it clips overflow, and opens **upwards** near the bottom
+  of the window. Same `'skip' | 'new' | 'item:<id>'` values as before, so the
+  table's logic was unchanged. Checked in a browser against 185 items
+  (search, multi-word, no match, keyboard, new-from-typed, Esc, click-away,
+  flip-up); the pane can't screenshot an open popup, so that was by DOM.
+- **Matching uses the last word as what a thing *is*** (found on Oscar's
+  real pantry: `2 garlic cloves` came back as "Garlic Hummus"). When one
+  name is inside the other, a shared last word is boosted (+0.05) and a
+  different last word is marked *down* (−0.25, below "check"): `garlic`
+  offers "Crushed Garlic" first and never preselects "Garlic Hummus"; `red
+  onion` prefers "Onion" over "Red Onion Chutney". If the pantry only has
+  the hummus, nothing is preselected (it is still listed).
 - **A bug the browser test caught before it shipped**: the amount box was
   `type="number"`, whose `bind:value` yields a *number*, so the `.trim()` on
   it threw, the screen silently stopped updating and "Create" did nothing.

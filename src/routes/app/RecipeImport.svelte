@@ -11,6 +11,7 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
 	import { onMount } from 'svelte';
+	import ItemPicker from './ItemPicker.svelte';
 
 	interface SupportedSite {
 		name: string;
@@ -184,10 +185,6 @@
 		toCheck: rows.filter((r) => chip(r).kind === 'check').length,
 		blankAmounts: rows.filter((r) => r.choice !== 'skip' && r.unresolved_quantity && !r.amountText.trim()).length
 	});
-
-	function suggestedIds(row: Row): Set<number> {
-		return new Set(row.suggestions.map((s) => s.item_id));
-	}
 
 	async function createRecipe() {
 		if (saving) return;
@@ -419,22 +416,16 @@
 							{/each}
 						</select>
 						<div class="pick">
-							<select aria-label="Pantry item for {row.raw}" bind:value={row.choice}>
-								{#if row.suggestions.length}
-									<optgroup label="Suggested">
-										{#each row.suggestions as s (s.item_id)}
-											<option value={`item:${s.item_id}`}>{s.name}</option>
-										{/each}
-									</optgroup>
-								{/if}
-								<option value="new">＋ New item…</option>
-								<option value="skip">Skip this line</option>
-								<optgroup label="All items">
-									{#each items.filter((it) => !suggestedIds(row).has(it.id)) as it (it.id)}
-										<option value={`item:${it.id}`}>{it.name}</option>
-									{/each}
-								</optgroup>
-							</select>
+							<ItemPicker
+								value={row.choice}
+								suggestions={row.suggestions}
+								{items}
+								label="Pantry item for {row.raw}"
+								onpick={(choice, newName) => {
+									row.choice = choice;
+									if (newName) row.newName = newName;
+								}}
+							/>
 							<span class="chip {c.kind}">{c.text}</span>
 							{#if row.choice === 'new'}
 								<input
@@ -804,7 +795,6 @@
 
 	.amount,
 	.unit,
-	.pick select,
 	.newname {
 		box-sizing: border-box;
 		width: 100%;
