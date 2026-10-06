@@ -78,6 +78,8 @@
 	let draft: RecipeDraft | null = $state(null);
 	let error: string | null = $state(null);
 	let imageBroken = $state(false);
+	// With a recipe showing the site list is out of the way; this brings it back.
+	let sitesOpen = $state(false);
 
 	let step: 'preview' | 'review' | 'wizard' = $state('preview');
 	let wizItems: WizItem[] = $state([]);
@@ -119,6 +121,7 @@
 		error = null;
 		draft = null;
 		imageBroken = false;
+		sitesOpen = false;
 		step = 'preview';
 		try {
 			const result = await invoke<RecipeDraft>('preview_recipe_from_url', { url });
@@ -396,6 +399,13 @@
 				</button>
 			</form>
 
+			{#if draft}
+				<button class="sites-toggle" onclick={() => (sitesOpen = !sitesOpen)}>
+					{sitesOpen ? 'Hide' : 'Show'} supported sites
+				</button>
+			{/if}
+
+			{#if !draft || sitesOpen}
 			<div class="sites">
 				<span class="sites-label">Supported sites</span>
 				{#each sites as site (site.name)}
@@ -415,6 +425,7 @@
 					they've been checked.
 				</span>
 			</div>
+			{/if}
 
 			{#if error}
 				<p class="error" role="alert">{error}</p>
@@ -713,6 +724,17 @@
 		align-items: center;
 		gap: 0.5rem;
 		margin-top: 0.9rem;
+	}
+
+	.sites-toggle {
+		margin-top: 0.7rem;
+		padding: 0;
+		background: none;
+		border: none;
+		color: #999;
+		font-size: 0.78rem;
+		text-decoration: underline;
+		cursor: pointer;
 	}
 
 	.sites-label {
