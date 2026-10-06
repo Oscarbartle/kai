@@ -18,8 +18,36 @@ use backend::ActiveBackend;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
+/// A Mac app launched from Finder starts with a soft limit of 256 open
+/// files (the shell's `ulimit` doesn't apply), and the Pantry opens one
+/// connection per item at once — every socket and every DNS lookup is a
+/// file, so past ~250 requests failed with "error sending request" (the
+/// log said `socketpair failed 24 (Too many open files)`). Raise the soft
+/// limit to what the OS allows; a no-op on Windows, which has no such cap.
+#[cfg(unix)]
+fn raise_open_file_limit() {
+    unsafe {
+        let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) != 0 {
+            return;
+        }
+        // macOS reports an "infinite" hard limit but rejects anything above
+        // OPEN_MAX (10240) when setting.
+        #[cfg(target_os = "macos")]
+        let target = lim.rlim_max.min(10240);
+        #[cfg(not(target_os = "macos"))]
+        let target = lim.rlim_max;
+        if target > lim.rlim_cur {
+            lim.rlim_cur = target;
+            libc::setrlimit(libc::RLIMIT_NOFILE, &lim);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(unix)]
+    raise_open_file_limit();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())

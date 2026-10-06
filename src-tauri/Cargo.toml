@@ -31,6 +31,9 @@ reqwest = { version = "0.12", features = ["json"] }
 rusqlite_migration = "2.6.0"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 # For tests/remote_backend.rs — a real embedded Postgres + a real
 # kai-server, proving RemoteBackend's HTTP calls actually match what the
