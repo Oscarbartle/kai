@@ -384,6 +384,94 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
   need the real Tauri runtime, so it couldn't be driven in a browser) and
   the actual save into the Downloads folder.
 
+## Recipe import from a URL — designed, NOT built yet
+
+Goal (Oscar): paste a recipe-site URL and get the recipe without typing it;
+best-guess each ingredient onto an existing Pantry item; for ingredients he
+isn't happy with or that have no match, a wizard to create the item and
+attach a SKU. A fixed list of supported sites is fine.
+
+- **Grounded in real pages (probed 2026-10-06), not assumed.** Most recipe
+  sites embed the whole recipe as schema.org `Recipe` JSON-LD in a
+  `<script type="application/ld+json">`: `name`, `image`, `recipeYield`,
+  `recipeIngredient` (free-text strings), `recipeInstructions` (list of
+  `HowToStep`). **One generic reader covers every site that has it** —
+  "supported sites" therefore means *sites verified to work*, not
+  per-site scrapers. Confirmed with real recipe pages: **RecipeTin Eats,
+  BBC Good Food, Serious Eats, Simply Recipes, Minimalist Baker, King
+  Arthur, Epicurious, Bon Appetit, Chelsea Sugar (NZ)**, and **Edmonds
+  (NZ)** (has ingredients, but its data lacked steps and servings in the
+  page tried). Oscar's chosen list: RecipeTin Eats, BBC Good Food,
+  Serious Eats (Jamie Oliver was probed and works, but he skipped it).
+  - **Shapes vary and must be tolerated**: `recipeYield` is `'4'`,
+    `'Makes 12'`, `['1', '1 cup']`, `'4 servings'` or missing;
+    `recipeInstructions` is a list of `HowToStep`, a list of strings, a
+    single string, or missing; `image` is a string, a list of strings, or
+    `ImageObject`s; the Recipe may sit inside an `@graph`.
+  - **Bot-blocking is real.** A plain request got **403** from
+    taste.com.au, delicious.com.au, Cookie and Kate, Sally's Baking
+    Addiction, Gluten Free on a Shoestring, Food Network, Gimme Some Oven
+    and The Kitchn (405 from Pinch of Yum), and Serious Eats blocked some
+    pages but not others. Those would need the app to load the page in its
+    own browser window (as the Woolworths login window does) rather than a
+    plain request — not decided, not built. Woolworths/New World recipe
+    pages, Annabel Langbein, Bite and Nadia Lim were *not* conclusively
+    tested (the probe landed on listing pages, or its link pattern
+    missed) — need real example links from Oscar.
+- **Ingredient lines are messy free text** and are the hard part, e.g.
+  `1/2 pound (225g) finely minced chicken livers`, `16  dried chillis (,
+  chopped into 1 cm / 0.5" pieces (Note 1))`, `groundnut or vegetable
+  oil` (no amount), `5cm piece of ginger`, `1 quart (1L) … stock`.
+- **Parsing decision: deterministic rules in the app, no AI for now.**
+  Free, offline, private, predictable; the wizard corrects the misses.
+  **Future idea (Oscar's, noted): AI-assisted parsing** — either a local
+  model via Ollama or a hosted model (he mentioned "the new jev ai" — it
+  was unclear which that is; ask). It would only replace the line-parsing
+  step; the preview/match/wizard around it would not change. Costs to
+  weigh then: an API key stored in the app and per-import cost and
+  privacy (hosted), or the machine to run it (local).
+- **Unit rules** (the app's model is unchanged: `g`/`mL`/`count` are real
+  shopping amounts, `tsp`/`tbsp` nominal): lb/oz → `g` and L → `mL` are
+  exact; kg → `g`; metric in brackets (`(225g)`, `(1L)`) wins when
+  present; tsp/tbsp stay nominal; a plain number with an item name is a
+  `count`. **Cups (and anything else without an honest conversion —
+  pinch, bunch, cloves, "to taste", no amount) leave the amount blank and
+  are flagged, showing the original text from the recipe next to it** so
+  Oscar can convert it himself (his decision: never pre-fill a guess).
+  Cups of milk vs cups of flour is exactly the density problem the app
+  deliberately doesn't solve.
+- **Matching** each ingredient to an existing item: clean the name (drop
+  prep words like chopped/sliced/fresh, brackets, notes), then exact
+  match (case/plural-insensitive), then close matches (token overlap /
+  containment, e.g. "onions" ↔ "Brown Onion"), keeping a confidence and
+  the runners-up. Shown as ✓ matched / ? check / ✗ no match — a
+  suggestion is never silently committed; every row can be re-pointed at
+  another item, set to "create new item", or skipped. Later idea:
+  remember Oscar's corrections as aliases so repeat ingredients match
+  better.
+- **Where it runs**: the desktop app (Rust: fetch + parse + match, so it
+  is unit-testable with `cargo test`), through the same `Backend` for
+  saving, so it works in local and remote mode. The phone can't import
+  (same reason it can't refresh prices: the fetching lives in the
+  desktop app).
+- **New-item wizard** for each ✗: name (prefilled from the cleaned
+  ingredient), perishable toggle, then a Woolworths product search
+  (needs a new search command — the app has only fetch-by-SKU today;
+  the search endpoint is documented in the Woolworths section) to pick a
+  SKU, or paste a SKU code/URL, or skip (an item with no SKU already
+  works and is flagged as such in lists).
+- **Saving has no single atomic call** (no bulk endpoint on the server):
+  items and the recipe are created step by step, so if a step fails the
+  wizard undoes what it created rather than leaving a half-built recipe.
+- **Build order, one slice at a time, confirming each:**
+  1. Fetch a URL, read the JSON-LD, show a preview of name/photo/
+     servings/steps. Saves nothing.
+  2. Parse ingredient lines, match to existing items, the review table,
+     and create the recipe with the matched/edited ingredients.
+  3. The new-item wizard with Woolworths SKU search.
+  4. Polish: alias learning; blocked sites via the app's own browser
+     window; sites with no structured data.
+
 ## Windows dev environment notes
 
 - `tauri dev` opening a blank window for ~25-30s before content appears (on
