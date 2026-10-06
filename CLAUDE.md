@@ -384,7 +384,7 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
   need the real Tauri runtime, so it couldn't be driven in a browser) and
   the actual save into the Downloads folder.
 
-## Recipe import from a URL — slice 1 of 4 done (preview only)
+## Recipe import from a URL — slices 1–2 of 4 done
 
 Goal (Oscar): paste a recipe-site URL and get the recipe without typing it;
 best-guess each ingredient onto an existing Pantry item; for ingredients he
@@ -475,8 +475,9 @@ attach a SKU. A fixed list of supported sites is fine.
 - **Build order, one slice at a time, confirming each:**
   1. ~~Fetch a URL, read the JSON-LD, show a preview of name/photo/
      servings/steps. Saves nothing.~~ **Done — see below.**
-  2. Parse ingredient lines, match to existing items, the review table,
-     and create the recipe with the matched/edited ingredients.
+  2. ~~Parse ingredient lines, match to existing items, the review table,
+     and create the recipe with the matched/edited ingredients.~~
+     **Done — see "Slice 2" below.**
   3. The new-item wizard with Woolworths SKU search.
   4. Polish: alias learning; blocked sites via the app's own browser
      window; sites with no structured data.
@@ -529,6 +530,86 @@ attach a SKU. A fixed list of supported sites is fine.
   unsupported-site error, the example chips, Enter-to-submit, a broken
   photo hidden); **not yet seen in the real Tauri window**, and the real
   fetch is covered only by the live test, not by clicking the button.
+
+### Slice 2 — done: parse, match, review, create
+
+"Match ingredients to my pantry →" on the preview opens a **review table**;
+"Create recipe" saves it. Code: `ingredient_parse.rs` (a line → amount/unit/
+name), `ingredient_match.rs` (name → Pantry suggestions), `import_flow.rs`
+(analysis + saving, tested against a real in-memory SQLite `LocalBackend`),
+plus the `analyze_import_ingredients` / `create_recipe_from_import`
+commands and `RecipeImport.svelte`.
+
+- **Parsing rules** (all decided with Oscar, all unit-tested on the real
+  lines from BBC Good Food, RecipeTin Eats and Serious Eats):
+  - `g`/`mL` for metric and exact conversions (kg, L, oz, lb; rounded to a
+    sensible precision); `tsp`/`tbsp` as written; `count` for "2 large eggs"
+    and for a can/tin/jar/packet. **Metric in brackets beats a non-metric
+    amount** (`1/2 pound (225g)` → 225 g; `1 quart (1L)` → 1000 mL; `1 can
+    (400g)` → 400 g) but not a plain count (`2 onions (85g)` stays 2, with
+    the bracket shown as a note).
+  - **Cups, pints, quarts and fl oz** (a cup of milk ≠ a cup of flour, the
+    density problem the app deliberately doesn't model) and things with no
+    honest conversion (cloves, bunch, pinch, sprig, "5cm piece", `2 x 400g`)
+    **leave the amount blank and show the recipe's own wording in amber**
+    ("The recipe says “2 cups”…") so Oscar converts it himself — never a
+    pre-filled guess. A range (`2-3 tbsp`) uses the larger end and says so.
+  - Names: only size/preparation words are dropped (`large`, `finely
+    chopped`); words that make a different product are **kept** (`crushed`,
+    `ground`, `dried`, `frozen`, `whole`, and `peeled`), because the Pantry
+    has items like "Crushed Garlic". On a can/tin/jar a leading form word is
+    kept too (`2 tins chopped tomatoes` → "Chopped tomatoes"). The note after
+    a comma, anything in brackets (nested ones too) and tails like "plus a
+    little for frying" / "to serve" are dropped. "garlic cloves" /
+    "celery stalks" become the item plus a blank "4 cloves".
+- **Matching**: words lowercased, filler dropped (`fresh`, `large`, `of`),
+  singularised; same words → **strong** (`Eggs` ↔ `egg`); one name inside the
+  other → **check** (`Onions` ↔ `Brown Onion`, scored by how much of the
+  longer name is covered); only the last word in common (`red onion` ↔
+  `Brown Onion`, `oyster sauce` ↔ `Soy Sauce`) → **suggested but never
+  preselected** (as likely the wrong sauce as the right onion). Top five
+  shown, best first, ties broken by shorter then A–Z so the pantry's order
+  never changes the answer.
+- **The review table**: per line — amount, unit, and a Pantry-item picker
+  (suggestions, "＋ New item…", "Skip this line", then every item A–Z) with
+  a chip: ✓ Match / ? Check / Your pick / New item / Skipped. Strong and
+  check matches start selected; a line with nothing convincing starts as
+  **Skip**, so nothing is created or linked unless chosen. Lines sharing an
+  item say so. A summary line counts matched / worth checking / new /
+  skipped / without an amount. **New items are plain** (name only, no SKU
+  yet) — the SKU wizard is slice 3.
+- **Saving** (`create_recipe_from_import`): validated and merged **before the
+  first write** — a recipe holds each item once (`recipe_items`' primary key
+  is recipe+item), so two lines on the same item become one, amounts added
+  when the units agree, and **refused with a message naming the item** when
+  they don't; a new-item name that matches an existing item (any
+  capitalisation) reuses it instead of making a twin; amounts must be > 0 and
+  have a unit. Then: create the recipe, create new items, link each item with
+  its quantity, set servings/source/photo/method (steps joined one per line,
+  which the apps number). **If any write fails, the recipe and the items this
+  import created are deleted again** (tested by forcing a real failure
+  mid-way) and the error says "Nothing was saved."; items that already
+  existed are never touched. Works in local and remote mode (same `Backend`).
+- **A bug the browser test caught before it shipped**: the amount box was
+  `type="number"`, whose `bind:value` yields a *number*, so the `.trim()` on
+  it threw, the screen silently stopped updating and "Create" did nothing.
+  It is a text box with `inputmode="decimal"` now. (Lesson for this app: do
+  not `bind:value` a number input into a string field.)
+- **Verified**: 28 new unit tests that run by default (parser incl. every real line above and a
+  never-panics sweep; matcher; plan/merge/validation; saving and rollback
+  against SQLite), plus `cargo test -p kai --lib live_ -- --ignored
+  --nocapture`, which fetches every listed site and **prints the whole
+  review** against a sample pantry — the way to eyeball a site before adding
+  it. The dialog was driven in a browser against a faked `invoke`: default
+  choices, editing, the unit-required and shared-item checks, a server error
+  keeping the dialog open, the exact payload, and the reload afterwards.
+  **Not yet seen in the real Tauri window, and not run end-to-end against
+  a real database from the button.**
+- **Known rough edges** (the review exists for these): odd lines parse to
+  odd names ("Lean fillet steak fat"); non-ingredients like "reserved chilli
+  soaking water" appear as lines to skip; "to taste"/"as needed" lines have
+  no amount; the matcher knows nothing about *your* naming beyond item names
+  (alias learning is slice 4).
 
 ## Windows dev environment notes
 

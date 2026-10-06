@@ -7,6 +7,9 @@ pub mod backend;
 pub mod backup;
 mod commands;
 pub mod db;
+mod import_flow;
+mod ingredient_match;
+mod ingredient_parse;
 mod recipe_import;
 mod woolworths;
 mod woolworths_cart;
@@ -98,6 +101,8 @@ pub fn run() {
             commands::export_backup,
             commands::list_supported_recipe_sites,
             commands::preview_recipe_from_url,
+            commands::analyze_import_ingredients,
+            commands::create_recipe_from_import,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

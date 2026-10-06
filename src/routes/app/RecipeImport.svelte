@@ -1,9 +1,12 @@
 <!--
-	"Import a recipe from a website" — slice 1: paste a link, see the recipe
-	the page carries. Nothing is saved yet; matching the ingredients to the
-	Pantry and creating items/SKUs are the next slices. The supported-sites
-	list comes from the importer itself (list_supported_recipe_sites), so
-	what is shown here is exactly what it accepts.
+	"Import a recipe from a website".
+	  1. Paste a link, see the recipe the page carries (nothing saved).
+	  2. Review: every ingredient line is split into amount/unit/name and given a
+	     best-guess Pantry item. Nothing is final — each line can point at a
+	     different item, become a new item, or be skipped, and amounts are
+	     editable. Only "Create recipe" saves, and it saves everything or nothing.
+	The supported-sites list comes from the importer itself
+	(list_supported_recipe_sites), so what is shown is exactly what it accepts.
 -->
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
@@ -26,7 +29,40 @@
 		steps: string[];
 	}
 
-	let { onClose }: { onClose: () => void } = $props();
+	interface Suggestion {
+		item_id: number;
+		name: string;
+		score: number;
+	}
+
+	interface AnalyzedLine {
+		raw: string;
+		amount: number | null;
+		unit: string | null;
+		unresolved_quantity: string | null;
+		note: string | null;
+		name: string;
+		confidence: 'strong' | 'check' | 'none';
+		suggestions: Suggestion[];
+	}
+
+	interface Analysis {
+		rows: AnalyzedLine[];
+		items: { id: number; name: string }[];
+	}
+
+	// What the review table edits: the analysis plus the user's choices.
+	interface Row extends AnalyzedLine {
+		choice: string; // 'item:<id>' | 'new' | 'skip'
+		newName: string;
+		amountText: string;
+		unitChoice: string; // '' | g | mL | count | tsp | tbsp
+	}
+
+	const UNITS = ['g', 'mL', 'count', 'tsp', 'tbsp'];
+
+	let { onClose, onCreated }: { onClose: () => void; onCreated: (recipeId: number) => void } =
+		$props();
 
 	let sites: SupportedSite[] = $state([]);
 	let url = $state('');
@@ -34,6 +70,15 @@
 	let draft: RecipeDraft | null = $state(null);
 	let error: string | null = $state(null);
 	let imageBroken = $state(false);
+
+	let step: 'preview' | 'review' = $state('preview');
+	let analyzing = $state(false);
+	let saving = $state(false);
+	let items: { id: number; name: string }[] = $state([]);
+	let rows: Row[] = $state([]);
+	let recipeName = $state('');
+	let servingsText = $state('');
+	let reviewError: string | null = $state(null);
 
 	// A slow fetch must not overwrite the result of a newer one.
 	let latestRequest = 0;
@@ -53,6 +98,7 @@
 		error = null;
 		draft = null;
 		imageBroken = false;
+		step = 'preview';
 		try {
 			const result = await invoke<RecipeDraft>('preview_recipe_from_url', { url });
 			if (request !== latestRequest) return;
@@ -62,6 +108,138 @@
 			if (request !== latestRequest) return;
 			error = String(e);
 			status = 'error';
+		}
+	}
+
+	const tidy = (n: number) => String(Math.round(n * 1000) / 1000);
+
+	async function startReview() {
+		if (!draft || analyzing) return;
+		analyzing = true;
+		reviewError = null;
+		try {
+			const analysis = await invoke<Analysis>('analyze_import_ingredients', {
+				lines: draft.ingredient_lines
+			});
+			items = analysis.items;
+			recipeName = draft.name;
+			servingsText = draft.servings != null ? String(draft.servings) : '';
+			rows = analysis.rows.map((r) => ({
+				...r,
+				// The best guess is preselected when it is good enough; a line with
+				// nothing convincing starts as "skip" so nothing is created or
+				// linked unless the user chooses it.
+				choice:
+					r.confidence !== 'none' && r.suggestions.length > 0
+						? `item:${r.suggestions[0].item_id}`
+						: 'skip',
+				newName: r.name,
+				amountText: r.amount != null ? tidy(r.amount) : '',
+				unitChoice: r.unit ?? ''
+			}));
+			step = 'review';
+		} catch (e) {
+			error = String(e);
+		} finally {
+			analyzing = false;
+		}
+	}
+
+	function chosenItemId(row: Row): number | null {
+		return row.choice.startsWith('item:') ? Number(row.choice.slice(5)) : null;
+	}
+
+	function chip(row: Row): { text: string; kind: string } {
+		if (row.choice === 'skip') return { text: 'Skipped', kind: 'skip' };
+		if (row.choice === 'new') return { text: 'New item', kind: 'new' };
+		const best = row.suggestions[0];
+		if (best && chosenItemId(row) === best.item_id) {
+			if (row.confidence === 'strong') return { text: '✓ Match', kind: 'good' };
+			if (row.confidence === 'check') return { text: '? Check', kind: 'check' };
+		}
+		return { text: 'Your pick', kind: 'good' };
+	}
+
+	// Lines that end up on the same item are merged on save.
+	function targetKey(row: Row): string | null {
+		const id = chosenItemId(row);
+		if (id != null) return `item:${id}`;
+		if (row.choice === 'new' && row.newName.trim()) return `new:${row.newName.trim().toLowerCase()}`;
+		return null;
+	}
+
+	let sharedTargets = $derived.by(() => {
+		const counts = new Map<string, number>();
+		for (const r of rows) {
+			const k = targetKey(r);
+			if (k) counts.set(k, (counts.get(k) ?? 0) + 1);
+		}
+		return counts;
+	});
+
+	let summary = $derived({
+		matched: rows.filter((r) => r.choice.startsWith('item:')).length,
+		created: rows.filter((r) => r.choice === 'new').length,
+		skipped: rows.filter((r) => r.choice === 'skip').length,
+		toCheck: rows.filter((r) => chip(r).kind === 'check').length,
+		blankAmounts: rows.filter((r) => r.choice !== 'skip' && r.unresolved_quantity && !r.amountText.trim()).length
+	});
+
+	function suggestedIds(row: Row): Set<number> {
+		return new Set(row.suggestions.map((s) => s.item_id));
+	}
+
+	async function createRecipe() {
+		if (saving) return;
+		reviewError = null;
+
+		const chosen = rows.filter((r) => r.choice !== 'skip');
+		for (const r of chosen) {
+			const amount = r.amountText.trim();
+			if (amount !== '' && (!Number.isFinite(Number(amount)) || Number(amount) <= 0)) {
+				reviewError = `“${r.raw}”: the amount must be a number above zero, or left blank.`;
+				return;
+			}
+			if (amount !== '' && !r.unitChoice) {
+				reviewError = `“${r.raw}”: pick a unit for the amount, or clear the amount.`;
+				return;
+			}
+			if (r.choice === 'new' && !r.newName.trim()) {
+				reviewError = `“${r.raw}”: give the new item a name, or choose another option.`;
+				return;
+			}
+		}
+		const servings = servingsText.trim();
+		if (servings !== '' && !(Number.isInteger(Number(servings)) && Number(servings) > 0)) {
+			reviewError = 'Servings must be a whole number, or left blank.';
+			return;
+		}
+
+		saving = true;
+		try {
+			const outcome = await invoke<{ recipe_id: number; created_items: string[] }>(
+				'create_recipe_from_import',
+				{
+					request: {
+						name: recipeName,
+						source_url: draft?.source_url ?? '',
+						image_url: draft?.image_url ?? null,
+						servings: servings === '' ? null : Number(servings),
+						steps: draft?.steps ?? [],
+						ingredients: chosen.map((r) => ({
+							item_id: chosenItemId(r),
+							new_item_name: r.choice === 'new' ? r.newName.trim() : null,
+							amount: r.amountText.trim() === '' ? null : Number(r.amountText),
+							unit: r.amountText.trim() === '' ? null : r.unitChoice
+						}))
+					}
+				}
+			);
+			onCreated(outcome.recipe_id);
+		} catch (e) {
+			reviewError = String(e);
+		} finally {
+			saving = false;
 		}
 	}
 </script>
@@ -74,6 +252,7 @@
 >
 	<div
 		class="box"
+		class:wide={step === 'review'}
 		onclick={(e) => e.stopPropagation()}
 		onkeydown={(e) => e.stopPropagation()}
 		role="dialog"
@@ -82,94 +261,210 @@
 		tabindex="-1"
 	>
 		<div class="head">
-			<h3>Import a recipe from a website</h3>
+			<h3>{step === 'review' ? 'Review the ingredients' : 'Import a recipe from a website'}</h3>
 			<button class="close" onclick={onClose} aria-label="Close">✕</button>
 		</div>
 
-		<form
-			class="url-row"
-			onsubmit={(e) => {
-				e.preventDefault();
-				fetchPreview();
-			}}
-		>
-			<input
-				class="url-input"
-				type="text"
-				placeholder="Paste a recipe link, e.g. https://www.bbcgoodfood.com/recipes/easy-pancakes"
-				aria-label="Recipe link"
-				bind:value={url}
-			/>
-			<button class="go" type="submit" disabled={!url.trim() || status === 'loading'}>
-				{status === 'loading' ? 'Fetching…' : 'Fetch recipe'}
-			</button>
-		</form>
-
-		<div class="sites">
-			<span class="sites-label">Supported sites</span>
-			{#each sites as site (site.name)}
-				<button
-					class="site"
-					title="Fill in an example link from {site.domains[0]}"
-					onclick={() => (url = site.example_url)}
-				>
-					{site.name}
-					<span class="domain">{site.domains[0]}</span>
+		{#if step === 'preview'}
+			<form
+				class="url-row"
+				onsubmit={(e) => {
+					e.preventDefault();
+					fetchPreview();
+				}}
+			>
+				<input
+					class="url-input"
+					type="text"
+					placeholder="Paste a recipe link, e.g. https://www.bbcgoodfood.com/recipes/easy-pancakes"
+					aria-label="Recipe link"
+					bind:value={url}
+				/>
+				<button class="go" type="submit" disabled={!url.trim() || status === 'loading'}>
+					{status === 'loading' ? 'Fetching…' : 'Fetch recipe'}
 				</button>
-			{/each}
-			<span class="sites-note">More can be added once they've been checked.</span>
-		</div>
+			</form>
 
-		{#if error}
-			<p class="error" role="alert">{error}</p>
-		{/if}
+			<div class="sites">
+				<span class="sites-label">Supported sites</span>
+				{#each sites as site (site.name)}
+					<button
+						class="site"
+						title="Fill in an example link from {site.domains[0]}"
+						onclick={() => (url = site.example_url)}
+					>
+						{site.name}
+						<span class="domain">{site.domains[0]}</span>
+					</button>
+				{/each}
+				<span class="sites-note">More can be added once they've been checked.</span>
+			</div>
 
-		{#if draft}
-			<div class="preview">
-				<div class="top">
-					{#if draft.image_url && !imageBroken}
-						<img
-							class="photo"
-							src={draft.image_url}
-							alt=""
-							onerror={() => (imageBroken = true)}
-						/>
-					{/if}
-					<div class="titles">
-						<h4>{draft.name}</h4>
-						<p class="meta">
-							{#if draft.servings != null}Serves {draft.servings} ·{/if}
-							{#if draft.yield_text}“{draft.yield_text}” ·{/if}
-							{draft.ingredient_lines.length} ingredients ·
-							{draft.steps.length} step{draft.steps.length === 1 ? '' : 's'} · from {draft.site}
-						</p>
-					</div>
-				</div>
+			{#if error}
+				<p class="error" role="alert">{error}</p>
+			{/if}
 
-				<div class="cols">
-					<section>
-						<h5>Ingredients</h5>
-						<ul>
-							{#each draft.ingredient_lines as line}
-								<li>{line}</li>
-							{/each}
-						</ul>
-					</section>
-					<section>
-						<h5>Method</h5>
-						{#if draft.steps.length === 0}
-							<p class="none">This page doesn't include a method.</p>
-						{:else}
-							<ol>
-								{#each draft.steps as step}
-									<li>{step}</li>
-								{/each}
-							</ol>
+			{#if draft}
+				<div class="preview">
+					<div class="top">
+						{#if draft.image_url && !imageBroken}
+							<img
+								class="photo"
+								src={draft.image_url}
+								alt=""
+								onerror={() => (imageBroken = true)}
+							/>
 						{/if}
-					</section>
-				</div>
+						<div class="titles">
+							<h4>{draft.name}</h4>
+							<p class="meta">
+								{#if draft.servings != null}Serves {draft.servings} ·{/if}
+								{#if draft.yield_text}“{draft.yield_text}” ·{/if}
+								{draft.ingredient_lines.length} ingredients ·
+								{draft.steps.length} step{draft.steps.length === 1 ? '' : 's'} · from {draft.site}
+							</p>
+							<button class="go next" onclick={startReview} disabled={analyzing}>
+								{analyzing ? 'Matching…' : 'Match ingredients to my pantry →'}
+							</button>
+						</div>
+					</div>
 
-				<p class="note">Preview only — nothing has been saved yet.</p>
+					<div class="cols">
+						<section>
+							<h5>Ingredients</h5>
+							<ul>
+								{#each draft.ingredient_lines as line}
+									<li>{line}</li>
+								{/each}
+							</ul>
+						</section>
+						<section>
+							<h5>Method</h5>
+							{#if draft.steps.length === 0}
+								<p class="none">This page doesn't include a method.</p>
+							{:else}
+								<ol>
+									{#each draft.steps as step}
+										<li>{step}</li>
+									{/each}
+								</ol>
+							{/if}
+						</section>
+					</div>
+
+					<p class="note">Nothing is saved until you create the recipe on the next screen.</p>
+				</div>
+			{/if}
+		{:else}
+			<div class="recipe-fields">
+				<label class="field grow">
+					<span>Recipe name</span>
+					<input type="text" bind:value={recipeName} />
+				</label>
+				<label class="field servings">
+					<span>Servings</span>
+					<input type="text" inputmode="numeric" placeholder="—" bind:value={servingsText} />
+				</label>
+			</div>
+
+			<p class="summary">
+				{summary.matched} matched to pantry items
+				{#if summary.toCheck > 0}({summary.toCheck} worth checking){/if}
+				· {summary.created} new · {summary.skipped} skipped
+				{#if summary.blankAmounts > 0}
+					· <span class="amber">{summary.blankAmounts} without an amount</span>
+				{/if}
+			</p>
+
+			<div class="table" role="table" aria-label="Ingredients">
+				<div class="table-head" role="row">
+					<span>From the recipe</span>
+					<span>Amount</span>
+					<span>Unit</span>
+					<span>Pantry item</span>
+				</div>
+				{#each rows as row, i (i)}
+					{@const c = chip(row)}
+					{@const key = targetKey(row)}
+					<div class="line" class:skipped={row.choice === 'skip'} role="row">
+						<div class="orig">
+							<span class="raw">{row.raw}</span>
+							{#if row.unresolved_quantity}
+								<span class="amber small">
+									The recipe says “{row.unresolved_quantity}” — enter grams/mL (or tsp/tbsp/count) below, or
+									leave it blank.
+								</span>
+							{:else if row.note}
+								<span class="muted small">{row.note}</span>
+							{/if}
+						</div>
+						<input
+							class="amount"
+							type="text"
+							inputmode="decimal"
+							placeholder="—"
+							aria-label="Amount for {row.raw}"
+							bind:value={row.amountText}
+							disabled={row.choice === 'skip'}
+						/>
+						<select
+							class="unit"
+							aria-label="Unit for {row.raw}"
+							bind:value={row.unitChoice}
+							disabled={row.choice === 'skip'}
+						>
+							<option value="">—</option>
+							{#each UNITS as u}
+								<option value={u}>{u}</option>
+							{/each}
+						</select>
+						<div class="pick">
+							<select aria-label="Pantry item for {row.raw}" bind:value={row.choice}>
+								{#if row.suggestions.length}
+									<optgroup label="Suggested">
+										{#each row.suggestions as s (s.item_id)}
+											<option value={`item:${s.item_id}`}>{s.name}</option>
+										{/each}
+									</optgroup>
+								{/if}
+								<option value="new">＋ New item…</option>
+								<option value="skip">Skip this line</option>
+								<optgroup label="All items">
+									{#each items.filter((it) => !suggestedIds(row).has(it.id)) as it (it.id)}
+										<option value={`item:${it.id}`}>{it.name}</option>
+									{/each}
+								</optgroup>
+							</select>
+							<span class="chip {c.kind}">{c.text}</span>
+							{#if row.choice === 'new'}
+								<input
+									class="newname"
+									type="text"
+									placeholder="Name of the new item"
+									aria-label="Name of the new item for {row.raw}"
+									bind:value={row.newName}
+								/>
+							{/if}
+							{#if key && (sharedTargets.get(key) ?? 0) > 1}
+								<span class="muted small">
+									Same item as another line — amounts are added together when their units match.
+								</span>
+							{/if}
+						</div>
+					</div>
+				{/each}
+			</div>
+
+			{#if reviewError}
+				<p class="error" role="alert">{reviewError}</p>
+			{/if}
+
+			<div class="footer">
+				<button class="secondary" onclick={() => (step = 'preview')} disabled={saving}>← Back</button>
+				<span class="footer-note">New items are created without a SKU; add one from the item later.</span>
+				<button class="go" onclick={createRecipe} disabled={saving || !recipeName.trim()}>
+					{saving ? 'Creating…' : `Create recipe (${rows.length - summary.skipped} ingredients)`}
+				</button>
 			</div>
 		{/if}
 	</div>
@@ -196,6 +491,10 @@
 		overflow-y: auto;
 		box-sizing: border-box;
 		color: #fff;
+	}
+
+	.box.wide {
+		width: 1100px;
 	}
 
 	.head {
@@ -234,7 +533,8 @@
 		padding: 0.6rem 0.75rem;
 	}
 
-	.url-input:focus {
+	input:focus,
+	select:focus {
 		outline: none;
 		border-color: #3a4a55;
 	}
@@ -251,9 +551,26 @@
 		cursor: pointer;
 	}
 
-	.go:disabled {
+	.go.next {
+		margin-top: 0.9rem;
+		background: var(--color-good, #5f9b46);
+	}
+
+	.go:disabled,
+	.secondary:disabled {
 		opacity: 0.5;
 		cursor: default;
+	}
+
+	.secondary {
+		background: none;
+		border: 1px solid #555;
+		border-radius: 6px;
+		color: #fff;
+		font-weight: bold;
+		font-size: 0.85rem;
+		padding: 0.55rem 1rem;
+		cursor: pointer;
 	}
 
 	.sites {
@@ -388,5 +705,169 @@
 		color: #999;
 		font-size: 0.8rem;
 		font-style: italic;
+	}
+
+	/* ---- review step ---- */
+
+	.recipe-fields {
+		display: flex;
+		gap: 0.75rem;
+	}
+
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		font-size: 0.75rem;
+		color: #999;
+	}
+
+	.field.grow {
+		flex: 1 1 auto;
+	}
+
+	.field.servings {
+		width: 6rem;
+	}
+
+	.field input {
+		background: #1e1e1d;
+		border: 1px solid #444;
+		border-radius: 6px;
+		color: #fff;
+		font-size: 0.9rem;
+		padding: 0.5rem 0.65rem;
+	}
+
+	.summary {
+		margin: 0.9rem 0 0.7rem;
+		color: #999;
+		font-size: 0.82rem;
+	}
+
+	.amber {
+		color: var(--color-warning, #c99a3d);
+	}
+
+	.muted {
+		color: #888;
+	}
+
+	.small {
+		font-size: 0.75rem;
+		line-height: 1.4;
+	}
+
+	.table {
+		border: 1px solid #333;
+		border-radius: 8px;
+		overflow: hidden;
+	}
+
+	.table-head,
+	.line {
+		display: grid;
+		grid-template-columns: minmax(0, 1.5fr) 6rem 6rem minmax(0, 1.7fr);
+		gap: 0.75rem;
+		padding: 0.6rem 0.8rem;
+		align-items: start;
+	}
+
+	.table-head {
+		background: #1e1e1d;
+		color: #999;
+		font-size: 0.72rem;
+		font-weight: bold;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+	}
+
+	.line {
+		border-top: 1px solid #333;
+	}
+
+	.line.skipped .orig {
+		opacity: 0.55;
+	}
+
+	.orig {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		min-width: 0;
+	}
+
+	.raw {
+		font-size: 0.85rem;
+		overflow-wrap: anywhere;
+	}
+
+	.amount,
+	.unit,
+	.pick select,
+	.newname {
+		box-sizing: border-box;
+		width: 100%;
+		background: #1e1e1d;
+		border: 1px solid #444;
+		border-radius: 6px;
+		color: #fff;
+		font-size: 0.85rem;
+		padding: 0.4rem 0.5rem;
+	}
+
+	.amount:disabled,
+	.unit:disabled {
+		opacity: 0.4;
+	}
+
+	.pick {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+		min-width: 0;
+	}
+
+	.chip {
+		align-self: flex-start;
+		border-radius: 999px;
+		font-size: 0.7rem;
+		font-weight: bold;
+		padding: 0.1rem 0.6rem;
+		background: #333;
+		color: #bbb;
+	}
+
+	.chip.good {
+		background: #2f4a27;
+		color: #b5e0a3;
+	}
+
+	.chip.check {
+		background: #4a3d1c;
+		color: #e8c978;
+	}
+
+	.chip.new {
+		background: #2b3d4a;
+		color: #a9cde6;
+	}
+
+	.footer {
+		position: sticky;
+		bottom: -1.5rem;
+		display: flex;
+		align-items: center;
+		gap: 0.9rem;
+		margin: 1.1rem -1.5rem -1.5rem;
+		padding: 0.9rem 1.5rem;
+		background: #232322;
+		border-top: 1px solid #333;
+	}
+
+	.footer-note {
+		flex: 1 1 auto;
+		color: #888;
+		font-size: 0.75rem;
 	}
 </style>

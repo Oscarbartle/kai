@@ -19,7 +19,7 @@ use rusqlite::Connection;
 use rusqlite_migration::{Migrations, M};
 use tauri::{AppHandle, Manager};
 
-fn migrations() -> Migrations<'static> {
+pub(crate) fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(
             "

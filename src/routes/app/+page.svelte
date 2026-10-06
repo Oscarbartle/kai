@@ -1161,7 +1161,17 @@
 	{/if}
 
 	{#if importOpen}
-		<RecipeImport onClose={() => (importOpen = false)} />
+		<RecipeImport
+			onClose={() => (importOpen = false)}
+			onCreated={async (recipeId) => {
+				importOpen = false;
+				// New items may have been created too, so reload both before
+				// opening the new recipe.
+				await loadItems();
+				await loadRecipes();
+				selectedRecipeId = recipeId;
+			}}
+		/>
 	{/if}
 
 	{#if editingTag}

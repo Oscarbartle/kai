@@ -780,6 +780,29 @@ pub async fn preview_recipe_from_url(url: String) -> Result<crate::recipe_import
     crate::recipe_import::preview_from_url(&url).await
 }
 
+/// Recipe import, slice 2: parse each ingredient line and match it against
+/// the Pantry. Reads only; the review table is built from this.
+#[tauri::command]
+pub async fn analyze_import_ingredients(
+    backend: State<'_, ActiveBackend>,
+    lines: Vec<String>,
+) -> Result<crate::import_flow::Analysis, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    let items = backend.list_items().await?;
+    Ok(crate::import_flow::analyze(&lines, &items))
+}
+
+/// Recipe import, slice 2: save the reviewed recipe (creating any new
+/// items), or change nothing at all.
+#[tauri::command]
+pub async fn create_recipe_from_import(
+    backend: State<'_, ActiveBackend>,
+    request: crate::import_flow::ImportRequest,
+) -> Result<crate::import_flow::ImportOutcome, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    crate::import_flow::create_recipe(&*backend, request).await
+}
+
 /// Settings → Backup → "Export data": downloads the shared server's whole
 /// database as a zip and saves it, timestamped, into the Downloads folder.
 /// Returns the saved path. Server only — in Local mode there is no server
