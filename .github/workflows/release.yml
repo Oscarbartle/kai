@@ -3,8 +3,9 @@ name: Release
 # Builds the Windows installer, signs the update artifacts, and publishes
 # a GitHub Release with a `latest.json` manifest — that manifest is what
 # Settings.svelte's in-app updater polls (see tauri.conf.json's
-# plugins.updater.endpoints). Mac build deliberately not wired up yet
-# (Windows first, per CLAUDE.md).
+# plugins.updater.endpoints). Windows and macOS (Apple Silicon) legs run
+# in parallel and tauri-action merges both into the one release and the
+# one `latest.json`; an OS with no entry there can't detect updates.
 #
 # Triggered by pushing a version tag (e.g. `v0.2.0`) — bump the version
 # in src-tauri/tauri.conf.json (and package.json, src-tauri/Cargo.toml)
@@ -18,7 +19,15 @@ on:
 
 jobs:
   release:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: ""
+          - os: macos-latest
+            args: "--target aarch64-apple-darwin"
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write
     steps:
@@ -29,6 +38,8 @@ jobs:
           node-version: 20
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
 
       - name: Install frontend dependencies
         run: npm ci
@@ -43,3 +54,4 @@ jobs:
           releaseName: "Kai ${{ github.ref_name }}"
           releaseDraft: true
           prerelease: false
+          args: ${{ matrix.args }}
