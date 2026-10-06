@@ -12,6 +12,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { onMount } from 'svelte';
 	import ItemPicker from './ItemPicker.svelte';
+	import NewItemWizard, { type WizItem } from './NewItemWizard.svelte';
 
 	interface SupportedSite {
 		name: string;
@@ -72,7 +73,8 @@
 	let error: string | null = $state(null);
 	let imageBroken = $state(false);
 
-	let step: 'preview' | 'review' = $state('preview');
+	let step: 'preview' | 'review' | 'wizard' = $state('preview');
+	let wizItems: WizItem[] = $state([]);
 	let analyzing = $state(false);
 	let saving = $state(false);
 	let items: { id: number; name: string }[] = $state([]);
@@ -186,31 +188,81 @@
 		blankAmounts: rows.filter((r) => r.choice !== 'skip' && r.unresolved_quantity && !r.amountText.trim()).length
 	});
 
-	async function createRecipe() {
-		if (saving) return;
-		reviewError = null;
+	// Names already in the pantry: a "new item" with one of these just uses that item.
+	let existingNames = $derived(new Set(items.map((i) => i.name.trim().toLowerCase())));
 
-		const chosen = rows.filter((r) => r.choice !== 'skip');
-		for (const r of chosen) {
+	const keyOf = (row: Row) => row.newName.trim().toLowerCase();
+
+	// The ingredients that need setting up as brand-new items, one entry per name
+	// (two lines for "tamari" are one item).
+	let newGroups = $derived.by(() => {
+		const groups = new Map<string, { key: string; name: string; lines: string[] }>();
+		for (const r of rows) {
+			if (r.choice !== 'new' || !r.newName.trim()) continue;
+			const key = keyOf(r);
+			if (existingNames.has(key)) continue; // will reuse the existing item
+			const g = groups.get(key);
+			if (g) g.lines.push(r.raw);
+			else groups.set(key, { key, name: r.newName.trim(), lines: [r.raw] });
+		}
+		return [...groups.values()];
+	});
+
+	/** The problem with the review table as it stands, or null if it can be saved. */
+	function validateReview(): string | null {
+		for (const r of rows.filter((r) => r.choice !== 'skip')) {
 			const amount = r.amountText.trim();
 			if (amount !== '' && (!Number.isFinite(Number(amount)) || Number(amount) <= 0)) {
-				reviewError = `“${r.raw}”: the amount must be a number above zero, or left blank.`;
-				return;
+				return `“${r.raw}”: the amount must be a number above zero, or left blank.`;
 			}
 			if (amount !== '' && !r.unitChoice) {
-				reviewError = `“${r.raw}”: pick a unit for the amount, or clear the amount.`;
-				return;
+				return `“${r.raw}”: pick a unit for the amount, or clear the amount.`;
 			}
 			if (r.choice === 'new' && !r.newName.trim()) {
-				reviewError = `“${r.raw}”: give the new item a name, or choose another option.`;
-				return;
+				return `“${r.raw}”: give the new item a name, or choose another option.`;
 			}
 		}
 		const servings = servingsText.trim();
 		if (servings !== '' && !(Number.isInteger(Number(servings)) && Number(servings) > 0)) {
-			reviewError = 'Servings must be a whole number, or left blank.';
+			return 'Servings must be a whole number, or left blank.';
+		}
+		return null;
+	}
+
+	// Review → wizard. Work already done on an item (products picked, name
+	// changed) is kept if the user goes back and forward again.
+	function goToWizard() {
+		reviewError = validateReview();
+		if (reviewError) return;
+		wizItems = newGroups.map(
+			(g) =>
+				wizItems.find((w) => w.key === g.key) ?? {
+					key: g.key,
+					name: g.name,
+					lines: g.lines,
+					perishable: true,
+					chosen: [],
+					query: g.name,
+					hits: null,
+					searching: false,
+					searchError: null,
+					manual: '',
+					manualError: null,
+					manualBusy: false
+				}
+		);
+		step = 'wizard';
+	}
+
+	async function createRecipe() {
+		if (saving) return;
+		reviewError = validateReview();
+		if (reviewError) {
+			step = 'review';
 			return;
 		}
+		const chosen = rows.filter((r) => r.choice !== 'skip');
+		const servings = servingsText.trim();
 
 		saving = true;
 		try {
@@ -223,12 +275,20 @@
 						image_url: draft?.image_url ?? null,
 						servings: servings === '' ? null : Number(servings),
 						steps: draft?.steps ?? [],
-						ingredients: chosen.map((r) => ({
-							item_id: chosenItemId(r),
-							new_item_name: r.choice === 'new' ? r.newName.trim() : null,
-							amount: r.amountText.trim() === '' ? null : Number(r.amountText),
-							unit: r.amountText.trim() === '' ? null : r.unitChoice
-						}))
+						ingredients: chosen.map((r) => {
+							const wiz = r.choice === 'new' ? wizItems.find((w) => w.key === keyOf(r)) : undefined;
+							return {
+								item_id: chosenItemId(r),
+								// The wizard may have renamed it.
+								new_item_name: r.choice === 'new' ? (wiz?.name.trim() || r.newName.trim()) : null,
+								new_item_perishable: wiz ? wiz.perishable : null,
+								new_item_skus: wiz
+									? wiz.chosen.filter((c) => c.status === 'ready' && c.sku).map((c) => c.sku)
+									: [],
+								amount: r.amountText.trim() === '' ? null : Number(r.amountText),
+								unit: r.amountText.trim() === '' ? null : r.unitChoice
+							};
+						})
 					}
 				}
 			);
@@ -249,7 +309,7 @@
 >
 	<div
 		class="box"
-		class:wide={step === 'review'}
+		class:wide={step !== 'preview'}
 		onclick={(e) => e.stopPropagation()}
 		onkeydown={(e) => e.stopPropagation()}
 		role="dialog"
@@ -258,7 +318,9 @@
 		tabindex="-1"
 	>
 		<div class="head">
-			<h3>{step === 'review' ? 'Review the ingredients' : 'Import a recipe from a website'}</h3>
+			<h3>
+				{step === 'review' ? 'Review the ingredients' : step === 'wizard' ? 'Set up the new items' : 'Import a recipe from a website'}
+			</h3>
 			<button class="close" onclick={onClose} aria-label="Close">✕</button>
 		</div>
 
@@ -352,6 +414,18 @@
 					<p class="note">Nothing is saved until you create the recipe on the next screen.</p>
 				</div>
 			{/if}
+		{:else if step === 'wizard'}
+			<NewItemWizard
+				bind:items={wizItems}
+				{existingNames}
+				{saving}
+				error={reviewError}
+				onback={() => {
+					reviewError = null;
+					step = 'review';
+				}}
+				ondone={createRecipe}
+			/>
 		{:else}
 			<div class="recipe-fields">
 				<label class="field grow">
@@ -452,10 +526,21 @@
 
 			<div class="footer">
 				<button class="secondary" onclick={() => (step = 'preview')} disabled={saving}>← Back</button>
-				<span class="footer-note">New items are created without a SKU; add one from the item later.</span>
-				<button class="go" onclick={createRecipe} disabled={saving || !recipeName.trim()}>
-					{saving ? 'Creating…' : `Create recipe (${rows.length - summary.skipped} ingredients)`}
-				</button>
+				<span class="footer-note">
+					{#if newGroups.length > 0}
+						{newGroups.length} new item{newGroups.length === 1 ? '' : 's'} to set up next: name, perishable, and a
+						Woolworths product.
+					{/if}
+				</span>
+				{#if newGroups.length > 0}
+					<button class="go" onclick={goToWizard} disabled={saving || !recipeName.trim()}>
+						Next: set up {newGroups.length} new item{newGroups.length === 1 ? '' : 's'} →
+					</button>
+				{:else}
+					<button class="go" onclick={createRecipe} disabled={saving || !recipeName.trim()}>
+						{saving ? 'Creating…' : `Create recipe (${rows.length - summary.skipped} ingredients)`}
+					</button>
+				{/if}
 			</div>
 		{/if}
 	</div>

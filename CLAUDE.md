@@ -384,7 +384,7 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
   need the real Tauri runtime, so it couldn't be driven in a browser) and
   the actual save into the Downloads folder.
 
-## Recipe import from a URL — slices 1–2 of 4 done
+## Recipe import from a URL — slices 1–3 of 4 done
 
 Goal (Oscar): paste a recipe-site URL and get the recipe without typing it;
 best-guess each ingredient onto an existing Pantry item; for ingredients he
@@ -478,7 +478,8 @@ attach a SKU. A fixed list of supported sites is fine.
   2. ~~Parse ingredient lines, match to existing items, the review table,
      and create the recipe with the matched/edited ingredients.~~
      **Done — see "Slice 2" below.**
-  3. The new-item wizard with Woolworths SKU search.
+  3. ~~The new-item wizard with Woolworths SKU search.~~
+     **Done — see "Slice 3" below.**
   4. Polish: alias learning; blocked sites via the app's own browser
      window; sites with no structured data.
 
@@ -631,6 +632,73 @@ commands and `RecipeImport.svelte`.
   soaking water" appear as lines to skip; "to taste"/"as needed" lines have
   no amount; the matcher knows nothing about *your* naming beyond item names
   (alias learning is slice 4).
+
+### Slice 3 — done: the new-item wizard
+
+When the review has lines set to **＋ New item**, the review's button becomes
+"Next: set up N new items →" and opens `NewItemWizard.svelte`: one step per
+*distinct* new item (two lines for "tamari" are one step). Per item: its
+name, a **Perishable** tick, and **Woolworths products** to link. With no new
+items the review saves directly, as in slice 2.
+
+- **Product search** (`woolworths::search_woolworths`, new command): the
+  public product-search endpoint, `GET /api/v1/products?target=search&search=…
+  &inStockProductsOnly=false&size=12`. **Needs a request header** — without
+  any `X-Requested-With` it answers 400 "Header is missing or is invalid";
+  the app's existing product lookup already sends one, and so does this.
+  Looked at live before building (2026-10-06), and the shape matters:
+  - results are a **mix of products and advert tiles** (`type:
+    "PromoTile"`, `sku: null`) — only products with a SKU are kept; a
+    nonsense query returns *only* a tile, so "nothing found" is an empty
+    list, not an error;
+  - names come back **all lowercase** (shown title-cased in the wizard,
+    stored as Woolworths gave them, like every other SKU);
+  - the search result has price, size, unit price, photo and stock status
+    but **not allergens/ingredients**, so **picking a product fetches its
+    full record at once** (`fetch_woolworths_sku`) — the wizard shows the
+    allergens (⚠ amber; "No allergens listed" otherwise — Oscar's partner
+    is gluten free, and real results include e.g. "kikkoman soy sauce
+    gluten free") and what is saved is exactly the fetched record.
+  - Typing never searches (Enter or the button does) so Woolworths isn't
+    hit per keystroke; one search runs automatically when a step is first
+    opened, from the item's name.
+- **Wizard behaviour**: results are click-to-toggle (several products per
+  item are fine, same as the Pantry); a product that fails to load blocks
+  "Next" until retried or removed; **or paste a Woolworths link / stock code**
+  to add one directly; out-of-stock and special prices are shown. A step with
+  no product says "Next without a product" and the item is created without a
+  SKU (as in slice 2). **Renaming an item to a name already in the Pantry**
+  swaps the step for a notice — "this line will use that item" — and no new
+  item or SKU is created (an import never reconfigures an item you already
+  have; tested). Going back and forward keeps all the work (products picked,
+  names, perishable flags) because it lives in the dialog's state, keyed by
+  the item's original name.
+- **Saving** is still one `create_recipe_from_import` call; the request grew
+  `new_item_perishable` and `new_item_skus` (full `Sku` records) per line.
+  Writes per new item: create it → `set_item_perishable(false)` if unticked →
+  `save_sku_to_item` for each product. If anything fails the existing
+  rollback deletes the recipe and the items it created, and **deleting an item
+  cascades to its SKUs**, so no orphan products are left (tested by counting
+  the `items`/`skus`/`recipes` tables after a forced failure). When two lines
+  name one new item, the first line's settings win but products picked on a
+  later line aren't lost; the same product picked twice is linked once. The
+  outcome reports `skus_added`.
+- **Verified**: 9 new unit tests (search parsing against a trimmed real
+  answer incl. the advert tile, odd/empty shapes, refused queries; the
+  new-item plan/merge/ignore-if-exists rules; saving flag + products +
+  allergens through a real in-memory SQLite; rollback leaving all three tables
+  empty), the `#[ignore]`d `live_search_finds_real_products` (real hits,
+  nonsense query → empty), and a full browser run of the wizard against a
+  faked `invoke` (auto-search, grouping, picking/toggling, a failing product
+  blocking Next, retry/remove, add-by-link, duplicate and junk input, the
+  existing-name notice, a failed save keeping the wizard open, back/forward
+  keeping state, the exact payload). **Not yet seen in the real Tauri window
+  or against the live Woolworths API from the button** (the command itself was
+  run live; the dialog was not).
+- **Left for later** (slice 4 and beyond): a preferred-SKU choice in the
+  wizard (the Pantry's ★ can still be set afterwards); suggesting
+  non-perishable for obvious staples (it defaults to perishable, like every
+  new item); aisle/breadcrumb data; tag choice for new items.
 
 ## Windows dev environment notes
 

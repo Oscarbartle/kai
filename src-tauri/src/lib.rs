@@ -39,6 +39,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             woolworths::fetch_woolworths_sku,
+            woolworths::search_woolworths,
             commands::create_item,
             commands::list_items,
             commands::save_sku_to_item,

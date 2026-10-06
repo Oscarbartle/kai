@@ -18,6 +18,7 @@ use crate::db::items::Item;
 use crate::db::recipe_items::VALID_UNITS;
 use crate::ingredient_match::{match_ingredient, Confidence, ItemSuggestion};
 use crate::ingredient_parse::{parse_ingredient_line, ParsedIngredient};
+use crate::woolworths::Sku;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------- analyzing
@@ -75,6 +76,16 @@ pub struct ImportIngredient {
     pub new_item_name: Option<String>,
     pub amount: Option<f64>,
     pub unit: Option<String>,
+    /// New items only: is it perishable? (Defaults to yes, like every new
+    /// item. A non-perishable ingredient is left off a shopping list when
+    /// its recipe is added to one.)
+    #[serde(default)]
+    pub new_item_perishable: Option<bool>,
+    /// New items only: Woolworths products to link, already fetched in full
+    /// (allergens and all) by the wizard. Ignored if the name turns out to
+    /// match an item that already exists — that item is used as it is.
+    #[serde(default)]
+    pub new_item_skus: Vec<Sku>,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -93,6 +104,8 @@ pub struct ImportOutcome {
     /// Names of the items this import had to create.
     pub created_items: Vec<String>,
     pub ingredient_count: usize,
+    /// How many Woolworths products were linked to the new items.
+    pub skus_added: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -101,11 +114,33 @@ pub enum Target {
     Create(String),
 }
 
+/// What to set up on an item this import creates.
+#[derive(Clone, Debug)]
+pub struct NewItemPlan {
+    pub is_perishable: bool,
+    pub skus: Vec<Sku>,
+}
+
+impl PartialEq for NewItemPlan {
+    fn eq(&self, other: &Self) -> bool {
+        self.is_perishable == other.is_perishable
+            && self.skus.iter().map(|s| &s.sku).eq(other.skus.iter().map(|s| &s.sku))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Planned {
     pub target: Target,
     pub amount: Option<f64>,
     pub unit: Option<String>,
+    /// Set only when `target` is `Create`.
+    pub new_item: Option<NewItemPlan>,
+}
+
+/// The same product twice (it can be picked twice) is linked once.
+fn unique_skus(skus: &[Sku]) -> Vec<Sku> {
+    let mut seen = std::collections::HashSet::new();
+    skus.iter().filter(|s| seen.insert(s.sku.clone())).cloned().collect()
 }
 
 /// Validates the request and folds it into the rows that will be saved:
@@ -158,8 +193,22 @@ pub fn plan(req: &ImportRequest, items: &[Item]) -> Result<Vec<Planned>, String>
             (a, b) => a == b,
         };
         match planned.iter_mut().find(|p| same_target(p)) {
-            None => planned.push(Planned { target, amount, unit }),
-            Some(existing) => match (existing.amount, amount) {
+            None => {
+                let new_item = matches!(target, Target::Create(_)).then(|| NewItemPlan {
+                    is_perishable: line.new_item_perishable.unwrap_or(true),
+                    skus: unique_skus(&line.new_item_skus),
+                });
+                planned.push(Planned { target, amount, unit, new_item })
+            }
+            Some(existing) => {
+                // Two lines for one new item: keep the first's settings, but
+                // don't lose products picked on the second.
+                if let Some(have) = existing.new_item.as_mut() {
+                    if have.skus.is_empty() {
+                        have.skus = unique_skus(&line.new_item_skus);
+                    }
+                }
+                match (existing.amount, amount) {
                 (_, None) => {}
                 (None, Some(_)) => {
                     existing.amount = amount;
@@ -177,7 +226,8 @@ pub fn plan(req: &ImportRequest, items: &[Item]) -> Result<Vec<Planned>, String>
                         unit.as_deref().unwrap_or("none"),
                     ));
                 }
-            },
+                }
+            }
         }
     }
     Ok(planned)
@@ -195,10 +245,11 @@ async fn run_plan(backend: &dyn Backend, req: &ImportRequest, planned: &[Planned
     let mut created: Vec<(i64, String)> = Vec::new();
 
     match write_everything(backend, recipe.id, req, planned, &mut created).await {
-        Ok(()) => Ok(ImportOutcome {
+        Ok(skus_added) => Ok(ImportOutcome {
             recipe_id: recipe.id,
             created_items: created.into_iter().map(|(_, name)| name).collect(),
             ingredient_count: planned.len(),
+            skus_added,
         }),
         Err(error) => {
             let mut leftovers = Vec::new();
@@ -228,13 +279,23 @@ async fn write_everything(
     req: &ImportRequest,
     planned: &[Planned],
     created: &mut Vec<(i64, String)>,
-) -> Result<(), String> {
+) -> Result<usize, String> {
+    let mut skus_added = 0;
     for line in planned {
         let item_id = match &line.target {
             Target::Existing(id) => *id,
             Target::Create(name) => {
                 let item = backend.create_item(name).await?;
                 created.push((item.id, item.name.clone()));
+                if let Some(setup) = &line.new_item {
+                    if !setup.is_perishable {
+                        backend.set_item_perishable(item.id, false).await?;
+                    }
+                    for sku in &setup.skus {
+                        backend.save_sku_to_item(item.id, sku).await?;
+                        skus_added += 1;
+                    }
+                }
                 item.id
             }
         };
@@ -256,21 +317,26 @@ async fn write_everything(
     if !method.is_empty() {
         backend.update_recipe_method(recipe_id, &method).await?;
     }
-    Ok(())
+    Ok(skus_added)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::{ItemsBackend, LocalBackend, RecipeItemsBackend, RecipesBackend};
+    use crate::backend::{ItemsBackend, LocalBackend, RecipeItemsBackend, RecipesBackend, SkusBackend};
     use rusqlite::Connection;
     use std::sync::{Arc, Mutex};
 
-    fn backend() -> LocalBackend {
+    fn backend_with_conn() -> (LocalBackend, Arc<Mutex<Connection>>) {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.pragma_update(None, "foreign_keys", true).unwrap();
         crate::db::migrations().to_latest(&mut conn).unwrap();
-        LocalBackend::new(Arc::new(Mutex::new(conn)))
+        let shared = Arc::new(Mutex::new(conn));
+        (LocalBackend::new(shared.clone()), shared)
+    }
+
+    fn backend() -> LocalBackend {
+        backend_with_conn().0
     }
 
     fn item(id: i64, name: &str) -> Item {
@@ -285,11 +351,33 @@ mod tests {
     }
 
     fn existing(id: i64, amount: Option<f64>, unit: Option<&str>) -> ImportIngredient {
-        ImportIngredient { item_id: Some(id), new_item_name: None, amount, unit: unit.map(String::from) }
+        ImportIngredient { item_id: Some(id), new_item_name: None, amount, unit: unit.map(String::from), new_item_perishable: None, new_item_skus: vec![] }
     }
 
     fn new_item(name: &str, amount: Option<f64>, unit: Option<&str>) -> ImportIngredient {
-        ImportIngredient { item_id: None, new_item_name: Some(name.into()), amount, unit: unit.map(String::from) }
+        ImportIngredient { item_id: None, new_item_name: Some(name.into()), amount, unit: unit.map(String::from), new_item_perishable: None, new_item_skus: vec![] }
+    }
+
+    fn plain_new() -> NewItemPlan {
+        NewItemPlan { is_perishable: true, skus: vec![] }
+    }
+
+    fn sku(code: &str, name: &str) -> Sku {
+        Sku {
+            provider: "woolworths".into(),
+            sku: code.into(),
+            name: name.into(),
+            brand: Some("kikkoman".into()),
+            variety: None,
+            price: crate::woolworths::SkuPrice { sale_price: Some(8.69), ..Default::default() },
+            size: crate::woolworths::SkuSize { volume_size: Some("600mL".into()), ..Default::default() },
+            quantity: crate::woolworths::SkuQuantity { unit: "Each".into(), ..Default::default() },
+            availability_status: Some("In Stock".into()),
+            stock_level: None,
+            images: vec![],
+            allergens: vec!["Contains Soy".into()],
+            ingredients: vec![],
+        }
     }
 
     fn request(ingredients: Vec<ImportIngredient>) -> ImportRequest {
@@ -362,10 +450,10 @@ mod tests {
         assert_eq!(
             planned,
             vec![
-                Planned { target: Target::Existing(1), amount: Some(3.0), unit: Some("count".into()) },
-                Planned { target: Target::Create("Rice vinegar".into()), amount: Some(3.0), unit: Some("tbsp".into()) },
-                Planned { target: Target::Existing(2), amount: Some(1.5), unit: Some("tsp".into()) },
-                Planned { target: Target::Create("Salt".into()), amount: Some(1.0), unit: Some("tsp".into()) },
+                Planned { target: Target::Existing(1), amount: Some(3.0), unit: Some("count".into()), new_item: None },
+                Planned { target: Target::Create("Rice vinegar".into()), amount: Some(3.0), unit: Some("tbsp".into()), new_item: Some(plain_new()) },
+                Planned { target: Target::Existing(2), amount: Some(1.5), unit: Some("tsp".into()), new_item: None },
+                Planned { target: Target::Create("Salt".into()), amount: Some(1.0), unit: Some("tsp".into()), new_item: Some(plain_new()) },
             ]
         );
     }
@@ -391,10 +479,10 @@ mod tests {
             .contains("needs a name"));
         assert!(bad(vec![]).contains("at least one ingredient"));
         assert!(bad(vec![existing(99, None, None)]).contains("no longer exists"));
-        assert!(bad(vec![ImportIngredient { item_id: Some(1), new_item_name: Some("x".into()), amount: None, unit: None }])
-            .contains("choose an item"));
-        assert!(bad(vec![ImportIngredient { item_id: None, new_item_name: None, amount: None, unit: None }])
-            .contains("choose an item"));
+        let both = ImportIngredient { new_item_name: Some("x".into()), ..existing(1, None, None) };
+        assert!(bad(vec![both]).contains("choose an item"));
+        let neither = ImportIngredient { item_id: None, ..existing(1, None, None) };
+        assert!(bad(vec![neither]).contains("choose an item"));
         assert!(bad(vec![new_item("   ", None, None)]).contains("needs a name"));
         assert!(bad(vec![existing(1, Some(0.0), Some("g"))]).contains("more than zero"));
         assert!(bad(vec![existing(1, Some(-2.0), Some("g"))]).contains("more than zero"));
@@ -408,6 +496,90 @@ mod tests {
     fn a_unit_without_an_amount_is_dropped() {
         let planned = plan(&request(vec![existing(1, None, Some("g"))]), &[item(1, "Onion")]).unwrap();
         assert_eq!((planned[0].amount, planned[0].unit.clone()), (None, None));
+    }
+
+    // ---- new items with a perishable flag and Woolworths products ----
+
+    #[test]
+    fn plan_carries_the_new_item_setup_through_a_merge() {
+        let (a_sku, b_sku) = (sku("270415", "highmark soy sauce golden"), sku("103725", "kikkoman soy sauce"));
+
+        // The first line's settings win; a product picked twice is linked once.
+        let mut first = new_item("Soy sauce", Some(1.0), Some("tbsp"));
+        first.new_item_perishable = Some(false);
+        first.new_item_skus = vec![a_sku.clone(), a_sku.clone()];
+        let mut second = new_item("soy SAUCE", Some(2.0), Some("tbsp"));
+        second.new_item_skus = vec![b_sku.clone()];
+        let planned = plan(&request(vec![first, second]), &[item(1, "Onion")]).unwrap();
+        assert_eq!(planned.len(), 1);
+        let setup = planned[0].new_item.as_ref().unwrap();
+        assert!(!setup.is_perishable);
+        assert_eq!(setup.skus.iter().map(|s| s.sku.as_str()).collect::<Vec<_>>(), ["270415"]);
+        assert_eq!(planned[0].amount, Some(3.0));
+
+        // ...but products picked only on the second line are not lost.
+        let bare = new_item("Tamari", None, None);
+        let mut later = new_item("tamari", None, None);
+        later.new_item_skus = vec![b_sku];
+        let planned = plan(&request(vec![bare, later]), &[]).unwrap();
+        let setup = planned[0].new_item.as_ref().unwrap();
+        assert!(setup.is_perishable, "perishable by default, like every other new item");
+        assert_eq!(setup.skus.len(), 1);
+    }
+
+    #[test]
+    fn a_new_name_that_matches_an_existing_item_uses_it_and_ignores_the_setup() {
+        let mut line = new_item("onion", Some(1.0), Some("count"));
+        line.new_item_perishable = Some(false);
+        line.new_item_skus = vec![sku("1", "some onion")];
+        let planned = plan(&request(vec![line]), &[item(7, "Onion")]).unwrap();
+        assert_eq!(planned[0].target, Target::Existing(7));
+        assert_eq!(planned[0].new_item, None, "an item you already have is never reconfigured by an import");
+    }
+
+    #[tokio::test]
+    async fn new_items_are_created_with_their_flag_and_products() {
+        let backend = backend();
+        let mut soy = new_item("Soy sauce", Some(2.0), Some("tbsp"));
+        soy.new_item_perishable = Some(false);
+        soy.new_item_skus = vec![sku("270415", "highmark soy sauce golden"), sku("103725", "kikkoman soy sauce")];
+        let outcome = create_recipe(&backend, request(vec![soy, new_item("Salt", None, None)])).await.unwrap();
+        assert_eq!(outcome.skus_added, 2);
+        assert_eq!(outcome.created_items, ["Soy sauce", "Salt"]);
+
+        let items = backend.list_items().await.unwrap();
+        let soy_item = items.iter().find(|i| i.name == "Soy sauce").unwrap();
+        let salt_item = items.iter().find(|i| i.name == "Salt").unwrap();
+        assert!(!soy_item.is_perishable, "the wizard's toggle was applied");
+        assert!(salt_item.is_perishable);
+
+        let skus = backend.list_skus_for_item(soy_item.id).await.unwrap();
+        assert_eq!(skus.len(), 2);
+        let kikkoman = skus.iter().find(|s| s.sku.sku == "103725").unwrap();
+        assert_eq!(kikkoman.sku.allergens, ["Contains Soy"], "allergens (a real requirement here) are kept");
+        assert_eq!(kikkoman.sku.price.sale_price, Some(8.69));
+        assert!(backend.list_skus_for_item(salt_item.id).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_failure_also_removes_the_products_it_had_linked() {
+        let (backend, conn) = backend_with_conn();
+        let planned = vec![
+            Planned {
+                target: Target::Create("Tamari".into()),
+                amount: None,
+                unit: None,
+                new_item: Some(NewItemPlan { is_perishable: false, skus: vec![sku("42", "tamari")] }),
+            },
+            Planned { target: Target::Existing(9999), amount: None, unit: None, new_item: None },
+        ];
+        let err = run_plan(&backend, &request(vec![]), &planned).await.unwrap_err();
+        assert!(err.ends_with("Nothing was saved."), "{err}");
+
+        let count = |table: &str| -> i64 {
+            conn.lock().unwrap().query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0)).unwrap()
+        };
+        assert_eq!((count("items"), count("skus"), count("recipes")), (0, 0, 0), "nothing at all is left behind");
     }
 
     // ---- real pages through the whole read → parse → match pipeline ----
@@ -492,9 +664,9 @@ mod tests {
         // and a new item have already been created.
         let req = request(vec![]);
         let planned = vec![
-            Planned { target: Target::Existing(onion.id), amount: Some(1.0), unit: Some("count".into()) },
-            Planned { target: Target::Create("Tamari".into()), amount: None, unit: None },
-            Planned { target: Target::Existing(9999), amount: None, unit: None },
+            Planned { target: Target::Existing(onion.id), amount: Some(1.0), unit: Some("count".into()), new_item: None },
+            Planned { target: Target::Create("Tamari".into()), amount: None, unit: None, new_item: None },
+            Planned { target: Target::Existing(9999), amount: None, unit: None, new_item: None },
         ];
         let err = run_plan(&backend, &req, &planned).await.unwrap_err();
 
