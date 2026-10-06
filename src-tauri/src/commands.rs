@@ -765,6 +765,21 @@ pub async fn test_remote_connection(url: String, token: String) -> Result<String
     }
 }
 
+/// The recipe sites the importer has been verified against — the one list
+/// the app shows, so "what is supported" can't drift from what the
+/// importer actually accepts.
+#[tauri::command]
+pub fn list_supported_recipe_sites() -> Vec<crate::recipe_import::SupportedSite> {
+    crate::recipe_import::SUPPORTED_SITES.to_vec()
+}
+
+/// Recipe import, slice 1: fetch a supported site's page and return the
+/// recipe it carries, for previewing. Saves nothing.
+#[tauri::command]
+pub async fn preview_recipe_from_url(url: String) -> Result<crate::recipe_import::RecipeDraft, String> {
+    crate::recipe_import::preview_from_url(&url).await
+}
+
 /// Settings → Backup → "Export data": downloads the shared server's whole
 /// database as a zip and saves it, timestamped, into the Downloads folder.
 /// Returns the saved path. Server only — in Local mode there is no server

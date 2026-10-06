@@ -384,7 +384,7 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
   need the real Tauri runtime, so it couldn't be driven in a browser) and
   the actual save into the Downloads folder.
 
-## Recipe import from a URL — designed, NOT built yet
+## Recipe import from a URL — slice 1 of 4 done (preview only)
 
 Goal (Oscar): paste a recipe-site URL and get the recipe without typing it;
 best-guess each ingredient onto an existing Pantry item; for ingredients he
@@ -401,8 +401,10 @@ attach a SKU. A fixed list of supported sites is fine.
   BBC Good Food, Serious Eats, Simply Recipes, Minimalist Baker, King
   Arthur, Epicurious, Bon Appetit, Chelsea Sugar (NZ)**, and **Edmonds
   (NZ)** (has ingredients, but its data lacked steps and servings in the
-  page tried). Oscar's chosen list: RecipeTin Eats, BBC Good Food,
-  Serious Eats (Jamie Oliver was probed and works, but he skipped it).
+  page tried) — all found with a *script*, not yet through the app's own
+  fetcher. Oscar's chosen starting list was RecipeTin Eats, BBC Good
+  Food and Serious Eats (Jamie Oliver works but he skipped it) — see
+  "Slice 1" below for what survived.
   - **Shapes vary and must be tolerated**: `recipeYield` is `'4'`,
     `'Makes 12'`, `['1', '1 cup']`, `'4 servings'` or missing;
     `recipeInstructions` is a list of `HowToStep`, a list of strings, a
@@ -425,11 +427,18 @@ attach a SKU. A fixed list of supported sites is fine.
 - **Parsing decision: deterministic rules in the app, no AI for now.**
   Free, offline, private, predictable; the wizard corrects the misses.
   **Future idea (Oscar's, noted): AI-assisted parsing** — either a local
-  model via Ollama or a hosted model (he mentioned "the new jev ai" — it
-  was unclear which that is; ask). It would only replace the line-parsing
-  step; the preview/match/wizard around it would not change. Costs to
-  weigh then: an API key stored in the app and per-import cost and
-  privacy (hosted), or the machine to run it (local).
+  model via Ollama or **Jev** (TypeSafe AI's "System One" model:
+  https://typesafe.ai/blog/introducing-system-one-models-and-jev). Per
+  that post, Jev returns type-safe *structured* output with confidence
+  scores rather than free text (a natural fit for turning an ingredient
+  line into amount/unit/name), is hosted only (API through TypeSafe's
+  console, no local option mentioned), is in **early access / waitlist**,
+  and priced at $0.042 per million input tokens with output free — a
+  vendor's own description, not tested here. It would only replace the
+  line-parsing step; the preview/match/wizard around it would not change.
+  Costs to weigh then: a key stored in the app, sending each recipe's
+  text to a third party, and waitlist access (hosted); or the machine to
+  run it (Ollama).
 - **Unit rules** (the app's model is unchanged: `g`/`mL`/`count` are real
   shopping amounts, `tsp`/`tbsp` nominal): lb/oz → `g` and L → `mL` are
   exact; kg → `g`; metric in brackets (`(225g)`, `(1L)`) wins when
@@ -464,13 +473,62 @@ attach a SKU. A fixed list of supported sites is fine.
   items and the recipe are created step by step, so if a step fails the
   wizard undoes what it created rather than leaving a half-built recipe.
 - **Build order, one slice at a time, confirming each:**
-  1. Fetch a URL, read the JSON-LD, show a preview of name/photo/
-     servings/steps. Saves nothing.
+  1. ~~Fetch a URL, read the JSON-LD, show a preview of name/photo/
+     servings/steps. Saves nothing.~~ **Done — see below.**
   2. Parse ingredient lines, match to existing items, the review table,
      and create the recipe with the matched/edited ingredients.
   3. The new-item wizard with Woolworths SKU search.
   4. Polish: alias learning; blocked sites via the app's own browser
      window; sites with no structured data.
+
+### Slice 1 — done: fetch a link, preview the recipe
+
+- **UI**: a "⤓ Import from website" button on the Recipe Book toolbar
+  opens `RecipeImport.svelte`: paste a link → "Fetch recipe" → a preview
+  (photo, title, "Serves N" plus the page's own wording of the yield,
+  ingredient lines as the page wrote them, numbered method). It says
+  "Preview only — nothing has been saved yet." and saves nothing.
+- **The supported-sites list lives in one place**,
+  `recipe_import::SUPPORTED_SITES` (Rust: name, domains, a real example
+  URL), and the dialog shows it (as clickable chips that fill in the
+  example link) via the `list_supported_recipe_sites` command — so what the
+  user sees is exactly what the importer accepts. **To add a site**: probe
+  it with real recipe pages, add an entry with a real `example_url`, run
+  `cargo test -p kai --lib live_ -- --ignored` (it fetches every listed
+  example for real and fails on a thin result), then it appears in the
+  app. A link from any other site is refused with "X isn't a supported
+  site yet. Supported: …" — enforced in Rust, not just the UI. Matching
+  is on the URL's *host* (the domain or a subdomain of it), never a
+  substring, so `notrecipetineats.com` and `evil.example/recipetineats.com`
+  are rejected (tested).
+- **Currently supported (verified through the app's own fetcher, live,
+  2026-10-06): RecipeTin Eats** (test page: 11 ingredients, 7 steps, photo)
+  **and BBC Good Food** (6 ingredients, 5 steps, photo).
+- **Serious Eats was dropped from the list.** It carries the recipe
+  data, but answered the app's own requests with **402 Payment Required**
+  every time (repeated runs); a script got through once and was refused
+  on another page. A site that can't be promised to work isn't listed
+  (and a comment in `recipe_import.rs` says why). The 403 sites above
+  were not worked around either: a refusal is reported plainly ("The site
+  refused the request … Some sites block automated downloads").
+- **Reader**: finds the `Recipe` in any `application/ld+json` block (top
+  level, inside `@graph`, `@type` as a string or list; one malformed
+  block doesn't hide a good one) and tolerates every shape seen: yield as
+  `4` / `"Makes 12"` / `["1","1 cup"]` / missing (servings = first whole
+  number 1–1000, else none, with the raw wording kept); instructions as
+  `HowToStep`s, `HowToSection`s, plain strings, or one string with
+  markup; images as a string, list, or `ImageObject`; HTML tags and
+  entities (`&amp;`, `&#8211;`, `&nbsp;`) cleaned from every text field,
+  block tags becoming line breaks. A page with no recipe, no title or no
+  ingredients gives a specific error. A recipe with *no method* is
+  allowed (Edmonds' page had none) and the preview says so.
+- **Tests**: 12 offline unit tests (the shapes above, URL matching, and
+  that every listed site's example routes back to itself with unique
+  domains) plus the `#[ignore]`d live test. **The dialog was exercised
+  in a browser against a faked `invoke`** (canned preview, an
+  unsupported-site error, the example chips, Enter-to-submit, a broken
+  photo hidden); **not yet seen in the real Tauri window**, and the real
+  fetch is covered only by the live test, not by clicking the button.
 
 ## Windows dev environment notes
 

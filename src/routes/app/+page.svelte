@@ -13,6 +13,7 @@
 	import Settings from './Settings.svelte';
 	import CartAdd from './CartAdd.svelte';
 	import TagEditor from './TagEditor.svelte';
+	import RecipeImport from './RecipeImport.svelte';
 	import { staleAgeDays } from './skuFreshness';
 	import { priceSkuGroups, sumSkuGroupTotals, type PricingSku } from './shoppingListPricing';
 
@@ -26,6 +27,7 @@
 
 	let activeTab: Tab = $state('pantry');
 	let settingsOpen: boolean = $state(false);
+	let importOpen: boolean = $state(false);
 
 	// Which shopping lists are ticked for a combined cart add. Cleared
 	// whenever the set of lists changes underneath it (see loadShoppingLists)
@@ -794,7 +796,7 @@
 		{/if}
 		<section
 			class="content"
-			class:locked={settingsOpen || selectedItem || selectedRecipe || selectedShoppingList || editingTag}
+			class:locked={settingsOpen || importOpen || selectedItem || selectedRecipe || selectedShoppingList || editingTag}
 		>
 			{#if activeTab === 'recipes'}
 				<div class="toolbar">
@@ -804,6 +806,9 @@
 						placeholder="Search recipes…"
 						bind:value={recipeSearch}
 					/>
+					<button class="refresh-pantry" onclick={() => (importOpen = true)}>
+						⤓ Import from website
+					</button>
 				</div>
 				<div class="cards">
 					{#each visibleRecipeCards as card (card.recipe.id)}
@@ -1153,6 +1158,10 @@
 				loadDeliveryFee();
 			}}
 		/>
+	{/if}
+
+	{#if importOpen}
+		<RecipeImport onClose={() => (importOpen = false)} />
 	{/if}
 
 	{#if editingTag}
