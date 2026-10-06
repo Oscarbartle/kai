@@ -662,7 +662,24 @@ pub async fn woolworths_login_status(window: tauri::WebviewWindow) -> Result<boo
 #[tauri::command]
 pub async fn woolworths_session_debug(window: tauri::WebviewWindow) -> Result<String, String> {
     let jar = cookie_jar_from_window(&window)?;
-    Ok(woolworths_cart::session_debug(&jar).await)
+    let mut out = woolworths_cart::session_debug(&jar).await;
+    // Names only, grouped by domain, for *everything* in the webview's
+    // store — shows where a signed-in session's cookies actually live
+    // when the Woolworths-domain filter above isn't finding them.
+    if let Ok(all) = window.cookies() {
+        let mut by_domain: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        for c in all {
+            by_domain
+                .entry(c.domain().unwrap_or("(none)").to_string())
+                .or_default()
+                .push(c.name().to_string());
+        }
+        out.push_str("\n\nAll cookies in the webview store, by domain:\n");
+        for (d, names) in by_domain {
+            out.push_str(&format!("  {d} ({}): {}\n", names.len(), names.join(", ")));
+        }
+    }
+    Ok(out)
 }
 
 /// The flat delivery fee added at Woolworths checkout — a user-entered
@@ -879,11 +896,23 @@ pub async fn open_woolworths_cart(app: tauri::AppHandle) -> Result<(), String> {
 fn cookie_jar_from_window(
     window: &tauri::WebviewWindow,
 ) -> Result<woolworths_cart::CookieJar, String> {
+    // `cookies()` + our own domain match, not `cookies_for_url`: on macOS
+    // wry's `cookies_for_url` compares the cookie's domain to
+    // `www.woolworths.co.nz` with plain `==`, but WKWebView reports a
+    // site-wide cookie as `.woolworths.co.nz` (leading dot), so every
+    // such cookie — the signed-in session ones — was silently dropped
+    // and only host-only guest/tracking cookies came through.
     let raw_cookies = window
-        .cookies_for_url("https://www.woolworths.co.nz/".parse().map_err(|e| format!("{e}"))?)
+        .cookies()
         .map_err(|e| format!("Couldn't read cookies from the app's Woolworths session: {e}"))?;
     let cookies: Vec<(String, String)> = raw_cookies
         .into_iter()
+        .filter(|c| {
+            c.domain().is_some_and(|d| {
+                let d = d.trim_start_matches('.');
+                d == "www.woolworths.co.nz" || d == "woolworths.co.nz"
+            })
+        })
         .map(|c| (c.name().to_string(), c.value().to_string()))
         .collect();
     Ok(woolworths_cart::CookieJar::from_cookies(cookies))
