@@ -345,9 +345,10 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
   everything but `/health`), `Cache-Control: no-store`,
   `crates/kai-server/src/routes/export.rs` + `db/export.rs`. Inside:
   `manifest.json` (format 1, `exported_at` UTC, server version, row count
-  per table) and one pretty-printed `<table>.json` per table, **all ten**
+  per table) and one pretty-printed `<table>.json` per table, **all eleven**
   (`items, skus, tags, item_tags, recipes, recipe_items, recipe_tags,
-  shopping_lists, shopping_list_items, settings`), each a list of rows
+  shopping_lists, shopping_list_items, settings, ingredient_aliases` — the last
+  added with the recipe importer's remembered wordings), each a list of rows
   with their original ids so every relationship survives.
   - Postgres makes the JSON itself (`jsonb_agg(to_jsonb(t) ORDER BY …)`),
     so a column added by a future migration is exported with no code
@@ -384,7 +385,7 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
   need the real Tauri runtime, so it couldn't be driven in a browser) and
   the actual save into the Downloads folder.
 
-## Recipe import from a URL — slices 1–3 of 4 done
+## Recipe import from a URL — done for now (slices 1–3, plus the parts of slice 4 Oscar picked)
 
 Goal (Oscar): paste a recipe-site URL and get the recipe without typing it;
 best-guess each ingredient onto an existing Pantry item; for ingredients he
@@ -480,8 +481,11 @@ attach a SKU. A fixed list of supported sites is fine.
      **Done — see "Slice 2" below.**
   3. ~~The new-item wizard with Woolworths SKU search.~~
      **Done — see "Slice 3" below.**
-  4. Polish: alias learning; blocked sites via the app's own browser
-     window; sites with no structured data.
+  4. Polish. **Done (picked by Oscar): alias learning, more verified
+     sites, and the wizard touches** — see "Slice 4". **Not done, on
+     purpose:** blocked sites via the app's own browser window; sites with
+     no structured data; pre-skipping odd lines ("to taste", "reserved
+     water"); AI-assisted parsing (Jev/Ollama).
 
 ### Slice 1 — done: fetch a link, preview the recipe
 
@@ -503,13 +507,21 @@ attach a SKU. A fixed list of supported sites is fine.
   is on the URL's *host* (the domain or a subdomain of it), never a
   substring, so `notrecipetineats.com` and `evil.example/recipetineats.com`
   are rejected (tested).
-- **Currently supported (verified through the app's own fetcher, live,
-  2026-10-06): RecipeTin Eats** (test page: 11 ingredients, 7 steps, photo)
-  **and BBC Good Food** (6 ingredients, 5 steps, photo).
-- **Serious Eats was dropped from the list.** It carries the recipe
-  data, but answered the app's own requests with **402 Payment Required**
-  every time (repeated runs); a script got through once and was refused
-  on another page. A site that can't be promised to work isn't listed
+- **Currently supported (each verified live through the app's own fetcher,
+  2026-10-06): RecipeTin Eats, BBC Good Food, Chelsea Sugar (NZ), Edmonds
+  (NZ — ingredients only, its pages carry no method, so the list shows
+  "ingredients only, no method" beside it via `SupportedSite::note`),
+  Minimalist Baker, King Arthur Baking, Epicurious, Bon Appetit.** (Added in
+  slice 4; the first two were the original pair.) Run
+  `cargo test -p kai --lib live_ -- --ignored --nocapture` to recheck them
+  all and print each site's whole review.
+- **Checked and not listed: Serious Eats and Simply Recipes** (and
+  Allrecipes, which refuses every page). They carry the recipe data, but
+  answered the app's own requests with **402 Payment Required** every time
+  — a bot wall; a script got through now and then and was refused on other
+  pages. Woolworths and New World recipe pages have no recipe data in them
+  at all; Annabel Langbein and Nadia Lim had no recipe links to test (not a
+  verdict). A site that can't be promised to work isn't listed
   (and a comment in `recipe_import.rs` says why). The 403 sites above
   were not worked around either: a refusal is reported plainly ("The site
   refused the request … Some sites block automated downloads").
@@ -695,10 +707,74 @@ items the review saves directly, as in slice 2.
   keeping state, the exact payload). **Not yet seen in the real Tauri window
   or against the live Woolworths API from the button** (the command itself was
   run live; the dialog was not).
-- **Left for later** (slice 4 and beyond): a preferred-SKU choice in the
-  wizard (the Pantry's ★ can still be set afterwards); suggesting
-  non-perishable for obvious staples (it defaults to perishable, like every
-  new item); aisle/breadcrumb data; tag choice for new items.
+- **Left for later**: aisle/breadcrumb data. (A preferred ★ product, tags
+  for new items and a non-perishable guess were added afterwards — see
+  Slice 4.)
+
+### Slice 4 (the parts picked) — done: remembered wordings, more sites, wizard touches
+
+- **Remembered wordings** ("alias learning"). When a person picks an item
+  for a line, the importer remembers *that wording → that item*, so the next
+  import starts there. Stored in a new shared table `ingredient_aliases
+  (alias CITEXT/NOCASE PRIMARY KEY, item_id → items ON DELETE CASCADE)` —
+  SQLite migration (appended) and Postgres `V2__ingredient_aliases.sql`; in
+  `db::export::TABLES` so backups include it; routes `GET`/`POST
+  /ingredient-aliases`; `AliasesBackend` (local and remote). Shared by Oscar
+  and his partner in remote mode, and an alias disappears with its item.
+  - **The key** (`ingredient_match::alias_key`) is the comparable words —
+    lowercase, filler dropped, singular — **sorted**, so `Onions`, `fresh
+    onion` and `onion, fresh` are one wording and `red onion` is another.
+  - **What gets remembered** (decided in the dialog, applied in
+    `create_recipe_from_import` *after* the recipe is saved): only where a
+    person made the call — a "check" match they accepted, a different item
+    than suggested, an item picked for a line with no suggestion. **Not** a
+    sure match simply accepted, not one already remembered and unchanged,
+    not a brand-new item. Two lines for one wording: the later choice wins,
+    which is also how a wrong alias is corrected (just pick the right item
+    next time; there is no separate "forget" screen — not built).
+  - **How it is used** (`import_flow::analyze`): a remembered item goes
+    **first and counts as a sure match, even over a different exact name**
+    (it is the user's own choice), shows a **"✓ Remembered"** chip, and the
+    other candidates stay below it. An alias to an item that no longer exists
+    is ignored.
+  - **It can never break an import**: remembering happens after the recipe is
+    safely saved and its failure is ignored; reading aliases falls back to
+    "none" — so a **desktop app newer than its server** (no `/ingredient-
+    aliases` route yet) simply remembers nothing until the server is rebuilt.
+- **More supported sites**: see Slice 1 above (6 added, Edmonds with its note).
+- **Wizard touches**, all on the new item only and all sent with the one
+  create call, rolled back with everything else:
+  - **Preferred product (★)**: shown once two or more products are picked;
+    the starred one is set preferred after saving (so the Pantry's star is
+    already right). Dropped if that product is no longer among those linked.
+  - **Tags**: chips, added with Enter, a comma, or by leaving the box;
+    suggestions from the existing tags (the `datalist`), each tag once
+    regardless of capitalisation, and an existing tag is reused by name, as
+    everywhere else.
+  - **Perishable guess**: `ingredient_parse::looks_non_perishable` pre-unticks
+    "perishable" for pantry staples (salt, sugar, flour, oil, vinegar,
+    sauces, pastes, stock, spices, powders, tins, "dried …", "ground cumin",
+    black pepper…) and says so ("Unticked because the name looks like a
+    pantry staple — change it if that's wrong"). Conservative where a word is
+    ambiguous: plain `pepper` could be a capsicum, `ground beef` is not a
+    spice. Still only a guess; fresh things start ticked.
+- **Verified**: new unit tests (alias keys; alias use in analysis incl. the
+  stale alias and "beats an exact match"; which choices are remembered; tag
+  and preferred-product planning; saving them and a remembered wording
+  through a real in-memory SQLite; the staple guesses; SQLite and Postgres
+  alias storage incl. case-insensitive upsert, empty/unknown-item refusal,
+  cascade on item delete — the Postgres side through the real `RemoteBackend`
+  against a real server — and the export manifest), the live site check for
+  all eight sites, and a browser run of the new screens against a faked
+  `invoke` (Remembered chips, exactly which wordings are flagged to learn,
+  the staple note, tag entry three ways with duplicates ignored and
+  suggestions narrowing, the ★ appearing/clearing, the full payload).
+  **Not yet seen in the real Tauri window.** After deploying, the server
+  must be rebuilt (it runs migration V2 on start) for remembered wordings to
+  start working.
+- **Deliberately left**: blocked sites via the app's own browser window,
+  sites with no structured data, pre-skipping odd lines, AI parsing, and a
+  screen to view/forget remembered wordings.
 
 ## Windows dev environment notes
 

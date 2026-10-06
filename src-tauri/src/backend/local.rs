@@ -4,6 +4,7 @@
 //! "local" half of Phase B, built and verified before the "remote" half
 //! (a `RemoteBackend` hitting a Postgres-backed server) exists at all.
 
+use super::aliases::AliasesBackend;
 use super::items::ItemsBackend;
 use super::recipe_items::RecipeItemsBackend;
 use super::recipes::RecipesBackend;
@@ -13,8 +14,10 @@ use super::shopping_lists::ShoppingListsBackend;
 use super::skus::SkusBackend;
 use super::tags::TagsBackend;
 use crate::db::{
-    items, recipe_items, recipes, settings, shopping_list_items, shopping_lists, skus, tags,
+    ingredient_aliases, items, recipe_items, recipes, settings, shopping_list_items, shopping_lists,
+    skus, tags,
 };
+use crate::db::ingredient_aliases::IngredientAlias;
 use crate::db::items::Item;
 use crate::db::recipe_items::RecipeIngredient;
 use crate::db::recipes::Recipe;
@@ -70,6 +73,16 @@ impl ItemsBackend for LocalBackend {
     }
     async fn list_items(&self) -> Result<Vec<Item>, String> {
         items::list(&*self.lock()?)
+    }
+}
+
+#[async_trait]
+impl AliasesBackend for LocalBackend {
+    async fn list_ingredient_aliases(&self) -> Result<Vec<IngredientAlias>, String> {
+        ingredient_aliases::list(&*self.lock()?)
+    }
+    async fn set_ingredient_alias(&self, alias: &str, item_id: i64) -> Result<(), String> {
+        ingredient_aliases::set(&*self.lock()?, alias, item_id)
     }
 }
 

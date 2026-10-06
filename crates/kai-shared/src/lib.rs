@@ -13,6 +13,7 @@
 //! modules (Postgres) each reimplement the same *rules* against their
 //! own database, importing only the shapes and constants from here.
 
+pub mod ingredient_aliases;
 pub mod items;
 pub mod recipe_items;
 pub mod recipes;

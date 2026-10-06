@@ -16,8 +16,9 @@
 use crate::backend::Backend;
 use crate::db::items::Item;
 use crate::db::recipe_items::VALID_UNITS;
-use crate::ingredient_match::{match_ingredient, Confidence, ItemSuggestion};
-use crate::ingredient_parse::{parse_ingredient_line, ParsedIngredient};
+use crate::db::ingredient_aliases::IngredientAlias;
+use crate::ingredient_match::{alias_key, match_ingredient, Confidence, ItemSuggestion};
+use crate::ingredient_parse::{looks_non_perishable, parse_ingredient_line, ParsedIngredient};
 use crate::woolworths::Sku;
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +30,12 @@ pub struct AnalyzedIngredient {
     pub parsed: ParsedIngredient,
     pub confidence: Confidence,
     pub suggestions: Vec<ItemSuggestion>,
+    /// The top suggestion is there because the user chose it for this
+    /// wording on an earlier import.
+    pub learned: bool,
+    /// The name looks like a pantry staple (salt, a spice, a sauce, a tin):
+    /// the default for a new item's "perishable" tick.
+    pub likely_non_perishable: bool,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -44,17 +51,43 @@ pub struct Analysis {
     pub items: Vec<ItemRef>,
 }
 
-pub fn analyze(lines: &[String], items: &[Item]) -> Analysis {
+pub fn analyze(lines: &[String], items: &[Item], aliases: &[IngredientAlias]) -> Analysis {
     let candidates: Vec<(i64, &str)> = items.iter().map(|i| (i.id, i.name.as_str())).collect();
+    // Only aliases whose item still exists can be used.
+    let remembered: std::collections::HashMap<String, i64> = aliases
+        .iter()
+        .filter(|a| items.iter().any(|i| i.id == a.item_id))
+        .map(|a| (a.alias.to_lowercase(), a.item_id))
+        .collect();
     let rows = lines
         .iter()
         .map(|line| {
             let parsed = parse_ingredient_line(line);
-            let found = match_ingredient(&parsed.name, &candidates);
+            let mut found = match_ingredient(&parsed.name, &candidates);
+            let mut learned = false;
+
+            // What the user chose before beats any guess — it goes first and
+            // counts as a sure match, even over a different "exact" one.
+            let key = alias_key(&parsed.name);
+            let known = if key.is_empty() { None } else { remembered.get(&key).copied() };
+            if let Some(item) = known.and_then(|id| items.iter().find(|i| i.id == id)) {
+                found.suggestions.retain(|s| s.item_id != item.id);
+                found.suggestions.insert(
+                    0,
+                    ItemSuggestion { item_id: item.id, name: item.name.clone(), score: 1.0 },
+                );
+                found.suggestions.truncate(5);
+                found.confidence = Confidence::Strong;
+                learned = true;
+            }
+
+            let likely_non_perishable = looks_non_perishable(&parsed.name);
             AnalyzedIngredient {
                 parsed,
                 confidence: found.confidence,
                 suggestions: found.suggestions,
+                learned,
+                likely_non_perishable,
             }
         })
         .collect();
@@ -86,6 +119,18 @@ pub struct ImportIngredient {
     /// match an item that already exists — that item is used as it is.
     #[serde(default)]
     pub new_item_skus: Vec<Sku>,
+    /// New items only: tags to give it (created if they don't exist yet).
+    #[serde(default)]
+    pub new_item_tags: Vec<String>,
+    /// New items only: the stock code of the product to prefer (the ★), one
+    /// of `new_item_skus`.
+    #[serde(default)]
+    pub new_item_preferred_sku: Option<String>,
+    /// Existing items only: remember that this ingredient wording means the
+    /// chosen item, so the next import starts there. The ingredient's
+    /// cleaned name, not the raw line.
+    #[serde(default)]
+    pub learn_name: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -106,6 +151,8 @@ pub struct ImportOutcome {
     pub ingredient_count: usize,
     /// How many Woolworths products were linked to the new items.
     pub skus_added: usize,
+    /// How many ingredient wordings were remembered for next time.
+    pub aliases_learned: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -119,12 +166,17 @@ pub enum Target {
 pub struct NewItemPlan {
     pub is_perishable: bool,
     pub skus: Vec<Sku>,
+    pub tags: Vec<String>,
+    /// Stock code of the preferred product; always one of `skus`.
+    pub preferred_sku: Option<String>,
 }
 
 impl PartialEq for NewItemPlan {
     fn eq(&self, other: &Self) -> bool {
         self.is_perishable == other.is_perishable
             && self.skus.iter().map(|s| &s.sku).eq(other.skus.iter().map(|s| &s.sku))
+            && self.tags == other.tags
+            && self.preferred_sku == other.preferred_sku
     }
 }
 
@@ -135,6 +187,16 @@ pub struct Planned {
     pub unit: Option<String>,
     /// Set only when `target` is `Create`.
     pub new_item: Option<NewItemPlan>,
+}
+
+/// Trimmed, non-empty, each tag once (any capitalisation), in the order given.
+fn clean_tags(tags: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    tags.iter()
+        .map(|t| t.trim())
+        .filter(|t| !t.is_empty() && seen.insert(t.to_lowercase()))
+        .map(str::to_string)
+        .collect()
 }
 
 /// The same product twice (it can be picked twice) is linked once.
@@ -197,6 +259,8 @@ pub fn plan(req: &ImportRequest, items: &[Item]) -> Result<Vec<Planned>, String>
                 let new_item = matches!(target, Target::Create(_)).then(|| NewItemPlan {
                     is_perishable: line.new_item_perishable.unwrap_or(true),
                     skus: unique_skus(&line.new_item_skus),
+                    tags: clean_tags(&line.new_item_tags),
+                    preferred_sku: line.new_item_preferred_sku.clone(),
                 });
                 planned.push(Planned { target, amount, unit, new_item })
             }
@@ -206,7 +270,13 @@ pub fn plan(req: &ImportRequest, items: &[Item]) -> Result<Vec<Planned>, String>
                 if let Some(have) = existing.new_item.as_mut() {
                     if have.skus.is_empty() {
                         have.skus = unique_skus(&line.new_item_skus);
+                        if have.preferred_sku.is_none() {
+                            have.preferred_sku = line.new_item_preferred_sku.clone();
+                        }
                     }
+                    let mut all = have.tags.clone();
+                    all.extend(clean_tags(&line.new_item_tags));
+                    have.tags = clean_tags(&all);
                 }
                 match (existing.amount, amount) {
                 (_, None) => {}
@@ -230,13 +300,47 @@ pub fn plan(req: &ImportRequest, items: &[Item]) -> Result<Vec<Planned>, String>
             }
         }
     }
+    // A preferred product must be one that is actually being linked.
+    for line in &mut planned {
+        if let Some(setup) = line.new_item.as_mut() {
+            if setup.preferred_sku.as_ref().is_some_and(|code| !setup.skus.iter().any(|s| &s.sku == code)) {
+                setup.preferred_sku = None;
+            }
+        }
+    }
     Ok(planned)
+}
+
+/// The (alias key, item id) pairs worth remembering from a reviewed request:
+/// only lines the user pointed at an item that exists, and only where the
+/// frontend flagged the choice as one a human made.
+pub fn alias_pairs(req: &ImportRequest, items: &[Item]) -> Vec<(String, i64)> {
+    let mut by_key: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+    for line in &req.ingredients {
+        if let (Some(name), Some(id)) = (line.learn_name.as_deref(), line.item_id) {
+            let key = alias_key(name);
+            if !key.is_empty() && items.iter().any(|i| i.id == id) {
+                by_key.insert(key, id); // a later line for the same wording wins
+            }
+        }
+    }
+    by_key.into_iter().collect()
 }
 
 pub async fn create_recipe(backend: &dyn Backend, req: ImportRequest) -> Result<ImportOutcome, String> {
     let items = backend.list_items().await?;
     let planned = plan(&req, &items)?;
-    run_plan(backend, &req, &planned).await
+    let mut outcome = run_plan(backend, &req, &planned).await?;
+
+    // Remembering wordings is a nicety, not part of the recipe: it happens
+    // only after the recipe is safely saved, and a failure here (an older
+    // server with no alias support, say) never undoes or fails the import.
+    for (key, item_id) in alias_pairs(&req, &items) {
+        if backend.set_ingredient_alias(&key, item_id).await.is_ok() {
+            outcome.aliases_learned += 1;
+        }
+    }
+    Ok(outcome)
 }
 
 /// Performs the writes; on any failure undoes what it did.
@@ -250,6 +354,7 @@ async fn run_plan(backend: &dyn Backend, req: &ImportRequest, planned: &[Planned
             created_items: created.into_iter().map(|(_, name)| name).collect(),
             ingredient_count: planned.len(),
             skus_added,
+            aliases_learned: 0,
         }),
         Err(error) => {
             let mut leftovers = Vec::new();
@@ -292,8 +397,14 @@ async fn write_everything(
                         backend.set_item_perishable(item.id, false).await?;
                     }
                     for sku in &setup.skus {
-                        backend.save_sku_to_item(item.id, sku).await?;
+                        let stored = backend.save_sku_to_item(item.id, sku).await?;
                         skus_added += 1;
+                        if setup.preferred_sku.as_deref() == Some(sku.sku.as_str()) {
+                            backend.set_sku_preferred(stored.id, true).await?;
+                        }
+                    }
+                    for tag in &setup.tags {
+                        backend.add_tag_to_item(item.id, tag).await?;
                     }
                 }
                 item.id
@@ -323,7 +434,9 @@ async fn write_everything(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::{ItemsBackend, LocalBackend, RecipeItemsBackend, RecipesBackend, SkusBackend};
+    use crate::backend::{
+        AliasesBackend, ItemsBackend, LocalBackend, RecipeItemsBackend, RecipesBackend, SkusBackend, TagsBackend,
+    };
     use rusqlite::Connection;
     use std::sync::{Arc, Mutex};
 
@@ -351,15 +464,15 @@ mod tests {
     }
 
     fn existing(id: i64, amount: Option<f64>, unit: Option<&str>) -> ImportIngredient {
-        ImportIngredient { item_id: Some(id), new_item_name: None, amount, unit: unit.map(String::from), new_item_perishable: None, new_item_skus: vec![] }
+        ImportIngredient { item_id: Some(id), new_item_name: None, amount, unit: unit.map(String::from), new_item_perishable: None, new_item_skus: vec![], new_item_tags: vec![], new_item_preferred_sku: None, learn_name: None }
     }
 
     fn new_item(name: &str, amount: Option<f64>, unit: Option<&str>) -> ImportIngredient {
-        ImportIngredient { item_id: None, new_item_name: Some(name.into()), amount, unit: unit.map(String::from), new_item_perishable: None, new_item_skus: vec![] }
+        ImportIngredient { item_id: None, new_item_name: Some(name.into()), amount, unit: unit.map(String::from), new_item_perishable: None, new_item_skus: vec![], new_item_tags: vec![], new_item_preferred_sku: None, learn_name: None }
     }
 
     fn plain_new() -> NewItemPlan {
-        NewItemPlan { is_perishable: true, skus: vec![] }
+        NewItemPlan { is_perishable: true, skus: vec![], tags: vec![], preferred_sku: None }
     }
 
     fn sku(code: &str, name: &str) -> Sku {
@@ -400,7 +513,7 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let a = analyze(&lines, &items);
+        let a = analyze(&lines, &items, &[]);
         assert_eq!(a.rows.len(), 4);
 
         assert_eq!((a.rows[0].parsed.amount, a.rows[0].parsed.unit.as_deref()), (Some(2.0), Some("count")));
@@ -421,9 +534,12 @@ mod tests {
 
     #[test]
     fn analysis_serializes_flat_for_the_review_table() {
-        let a = analyze(&["2 eggs".to_string()], &[item(2, "Eggs")]);
+        let a = analyze(&["2 eggs".to_string()], &[item(2, "Eggs")], &[]);
         let v = serde_json::to_value(&a.rows[0]).unwrap();
-        for key in ["raw", "amount", "unit", "unresolved_quantity", "note", "name", "confidence", "suggestions"] {
+        for key in [
+            "raw", "amount", "unit", "unresolved_quantity", "note", "name", "confidence", "suggestions", "learned",
+            "likely_non_perishable",
+        ] {
             assert!(v.get(key).is_some(), "{key} missing from {v}");
         }
         assert_eq!(v["confidence"], "strong");
@@ -569,7 +685,7 @@ mod tests {
                 target: Target::Create("Tamari".into()),
                 amount: None,
                 unit: None,
-                new_item: Some(NewItemPlan { is_perishable: false, skus: vec![sku("42", "tamari")] }),
+                new_item: Some(NewItemPlan { is_perishable: false, skus: vec![sku("42", "tamari")], tags: vec![], preferred_sku: None }),
             },
             Planned { target: Target::Existing(9999), amount: None, unit: None, new_item: None },
         ];
@@ -580,6 +696,123 @@ mod tests {
             conn.lock().unwrap().query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0)).unwrap()
         };
         assert_eq!((count("items"), count("skus"), count("recipes")), (0, 0, 0), "nothing at all is left behind");
+    }
+
+    // ---- what the importer learns, tags, and the preferred product ----
+
+    fn alias(key: &str, item_id: i64) -> IngredientAlias {
+        IngredientAlias { alias: key.into(), item_id }
+    }
+
+    #[test]
+    fn a_remembered_choice_goes_first_and_counts_as_sure() {
+        let items = vec![item(1, "Brown Onion"), item(2, "Red Onion"), item(3, "Onion"), item(4, "Eggs")];
+        let aliases = vec![alias(&alias_key("onion"), 1), alias("ghost", 99)];
+        let lines: Vec<String> = ["1 onion", "2 large onions", "1 ghost", "2 eggs"].iter().map(|s| s.to_string()).collect();
+        let a = analyze(&lines, &items, &aliases);
+
+        // "Onion" is an exact name match for item 3, but the user chose Brown Onion before.
+        for row in &a.rows[..2] {
+            assert!(row.learned, "{} should be remembered", row.parsed.raw);
+            assert_eq!(row.confidence, Confidence::Strong);
+            assert_eq!(row.suggestions[0].item_id, 1);
+            assert_eq!(row.suggestions[0].score, 1.0);
+            assert!(row.suggestions.iter().skip(1).all(|s| s.item_id != 1), "listed once");
+            assert!(row.suggestions.iter().any(|s| s.item_id == 3), "the other onions are still offered");
+        }
+        assert!(!a.rows[2].learned, "an alias to an item that no longer exists is ignored");
+        assert!(!a.rows[3].learned, "and nothing is remembered for eggs");
+        assert_eq!(a.rows[3].suggestions[0].item_id, 4);
+    }
+
+    #[test]
+    fn staples_are_flagged_for_the_perishable_default() {
+        let a = analyze(&["1 tsp salt".to_string(), "1 onion".to_string()], &[], &[]);
+        assert!(a.rows[0].likely_non_perishable);
+        assert!(!a.rows[1].likely_non_perishable);
+    }
+
+    #[test]
+    fn only_deliberate_choices_of_real_items_are_remembered() {
+        let items = vec![item(1, "Brown Onion"), item(2, "Red Onion")];
+        let learn = |item_id: Option<i64>, new: Option<&str>, name: Option<&str>| ImportIngredient {
+            learn_name: name.map(String::from),
+            new_item_name: new.map(String::from),
+            ..existing(item_id.unwrap_or(0), None, None)
+        };
+        let mut req = request(vec![]);
+        req.ingredients = vec![
+            learn(Some(1), None, Some("Onions")),
+            learn(Some(2), None, Some("red onion")),
+            learn(Some(1), None, Some("  ")),          // nothing to remember
+            learn(Some(99), None, Some("ghost")),       // not a real item
+            ImportIngredient { item_id: None, ..learn(None, Some("Tamari"), Some("tamari")) }, // a new item
+            learn(Some(2), None, None),                 // not flagged
+            learn(Some(2), None, Some("Onion, fresh")), // same wording as the first: the later choice wins
+        ];
+        assert_eq!(
+            alias_pairs(&req, &items),
+            vec![("onion".to_string(), 2), ("onion red".to_string(), 2)]
+        );
+    }
+
+    #[test]
+    fn plan_cleans_tags_and_checks_the_preferred_product() {
+        let (a, b) = (sku("270415", "highmark soy sauce golden"), sku("103725", "kikkoman soy sauce"));
+        let mut line = new_item("Soy sauce", None, None);
+        line.new_item_skus = vec![a.clone(), b.clone()];
+        line.new_item_tags = vec!["Sauce".into(), " sauce ".into(), "".into(), "Asian".into()];
+        line.new_item_preferred_sku = Some("103725".into());
+        let setup = plan(&request(vec![line]), &[]).unwrap().remove(0).new_item.unwrap();
+        assert_eq!(setup.tags, ["Sauce", "Asian"], "trimmed, blanks dropped, each tag once");
+        assert_eq!(setup.preferred_sku.as_deref(), Some("103725"));
+
+        // a preferred product that isn't among those linked is dropped, not trusted
+        let mut stray = new_item("Soy sauce", None, None);
+        stray.new_item_skus = vec![a];
+        stray.new_item_preferred_sku = Some("999".into());
+        assert_eq!(plan(&request(vec![stray]), &[]).unwrap()[0].new_item.as_ref().unwrap().preferred_sku, None);
+
+        // two lines for one new item: the tags are combined
+        let mut first = new_item("Tamari", None, None);
+        first.new_item_tags = vec!["Sauce".into()];
+        let mut second = new_item("tamari", None, None);
+        second.new_item_tags = vec!["sauce".into(), "Japanese".into()];
+        let merged = plan(&request(vec![first, second]), &[]).unwrap().remove(0).new_item.unwrap();
+        assert_eq!(merged.tags, ["Sauce", "Japanese"]);
+    }
+
+    #[tokio::test]
+    async fn saves_the_preferred_product_tags_and_remembered_wordings() {
+        let backend = backend();
+        let onion = backend.create_item("Brown Onion").await.unwrap();
+
+        let mut soy = new_item("Soy sauce", Some(2.0), Some("tbsp"));
+        soy.new_item_skus = vec![sku("270415", "highmark soy sauce golden"), sku("103725", "kikkoman soy sauce")];
+        soy.new_item_preferred_sku = Some("103725".into());
+        soy.new_item_tags = vec!["Sauce".into(), "Asian".into()];
+        let mut onions = existing(onion.id, Some(1.0), Some("count"));
+        onions.learn_name = Some("onion".into());
+
+        let outcome = create_recipe(&backend, request(vec![soy, onions])).await.unwrap();
+        assert_eq!(outcome.aliases_learned, 1);
+
+        let soy_item = backend.list_items().await.unwrap().into_iter().find(|i| i.name == "Soy sauce").unwrap();
+        let skus = backend.list_skus_for_item(soy_item.id).await.unwrap();
+        let preferred: Vec<_> = skus.iter().filter(|s| s.is_preferred).map(|s| s.sku.sku.as_str()).collect();
+        assert_eq!(preferred, ["103725"], "exactly the chosen product is starred");
+        let mut tags: Vec<_> = backend.list_tags_for_item(soy_item.id).await.unwrap().into_iter().map(|t| t.name).collect();
+        tags.sort();
+        assert_eq!(tags, ["Asian", "Sauce"]);
+
+        assert_eq!(
+            backend.list_ingredient_aliases().await.unwrap(),
+            vec![alias("onion", onion.id)],
+            "the wording is stored for next time"
+        );
+        // ...and an import that starts from it
+        let a = analyze(&["2 onions".to_string()], &backend.list_items().await.unwrap(), &backend.list_ingredient_aliases().await.unwrap());
+        assert!(a.rows[0].learned && a.rows[0].suggestions[0].item_id == onion.id);
     }
 
     // ---- real pages through the whole read → parse → match pipeline ----
@@ -601,7 +834,7 @@ mod tests {
 
         for site in crate::recipe_import::SUPPORTED_SITES {
             let draft = crate::recipe_import::preview_from_url(site.example_url).await.expect(site.name);
-            let analysis = analyze(&draft.ingredient_lines, &pantry);
+            let analysis = analyze(&draft.ingredient_lines, &pantry, &[]);
             println!("\n=== {} — {} ===", site.name, draft.name);
             for row in &analysis.rows {
                 let p = &row.parsed;

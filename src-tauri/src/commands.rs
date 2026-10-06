@@ -789,7 +789,10 @@ pub async fn analyze_import_ingredients(
 ) -> Result<crate::import_flow::Analysis, String> {
     let backend = backend.lock().map_err(|e| e.to_string())?.clone();
     let items = backend.list_items().await?;
-    Ok(crate::import_flow::analyze(&lines, &items))
+    // What was learned from earlier imports. A server from before this
+    // existed has no such route; that just means nothing is remembered yet.
+    let aliases = backend.list_ingredient_aliases().await.unwrap_or_default();
+    Ok(crate::import_flow::analyze(&lines, &items, &aliases))
 }
 
 /// Recipe import, slice 2: save the reviewed recipe (creating any new

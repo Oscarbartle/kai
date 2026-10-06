@@ -28,6 +28,9 @@ pub struct SupportedSite {
     pub name: &'static str,
     pub domains: &'static [&'static str],
     pub example_url: &'static str,
+    /// A known limitation worth telling the user about, shown beside the
+    /// site ("no method"); `None` for a site that imports everything.
+    pub note: Option<&'static str>,
 }
 
 pub const SUPPORTED_SITES: &[SupportedSite] = &[
@@ -35,19 +38,62 @@ pub const SUPPORTED_SITES: &[SupportedSite] = &[
         name: "RecipeTin Eats",
         domains: &["recipetineats.com"],
         example_url: "https://www.recipetineats.com/thai-red-curry/",
+        note: None,
     },
     SupportedSite {
         name: "BBC Good Food",
         domains: &["bbcgoodfood.com"],
         example_url: "https://www.bbcgoodfood.com/recipes/easy-pancakes",
+        note: None,
+    },
+    SupportedSite {
+        name: "Chelsea Sugar",
+        domains: &["chelsea.co.nz"],
+        example_url: "https://www.chelsea.co.nz/recipes/browse-recipes/banana-cake-chocolate-icing",
+        note: None,
+    },
+    SupportedSite {
+        name: "Edmonds",
+        domains: &["edmondscooking.co.nz"],
+        example_url: "https://edmondscooking.co.nz/recipes/cakes/banana-cake",
+        // Its pages carry the ingredients but not the method, so the
+        // method has to be typed in afterwards.
+        note: Some("ingredients only, no method"),
+    },
+    SupportedSite {
+        name: "Minimalist Baker",
+        domains: &["minimalistbaker.com"],
+        example_url: "https://minimalistbaker.com/honey-almond-snack-cake/",
+        note: None,
+    },
+    SupportedSite {
+        name: "King Arthur Baking",
+        domains: &["kingarthurbaking.com"],
+        example_url: "https://www.kingarthurbaking.com/recipes/cinnamon-roll-cake-recipe",
+        note: None,
+    },
+    SupportedSite {
+        name: "Epicurious",
+        domains: &["epicurious.com"],
+        example_url: "https://www.epicurious.com/recipes/food/views/diner-style-buttermilk-pancakes",
+        note: None,
+    },
+    SupportedSite {
+        name: "Bon Appetit",
+        domains: &["bonappetit.com"],
+        example_url: "https://www.bonappetit.com/recipe/rice-krispies-treats",
+        note: None,
     },
 ];
 
-// Checked and NOT listed: Serious Eats. Its pages carry the recipe data,
-// but the site answered Kai's own requests with "402 Payment Required"
-// every time (checked repeatedly, 2026-10-06) while a plain script got
-// through once and was refused on another page — it can't be promised to
-// work, so it is left off rather than listed and sometimes broken.
+// Checked and NOT listed (2026-10-06): Serious Eats and Simply Recipes. Their
+// pages carry the recipe data, but both answered Kai's own requests with
+// "402 Payment Required" every time (Allrecipes does too, for every page) —
+// a bot wall, not something to work around — while a plain script got
+// through now and then. A site that can't be promised to work is left off
+// rather than listed and sometimes broken. Also checked: Woolworths and New
+// World recipe pages (no recipe data in them), Annabel Langbein and Nadia
+// Lim (no recipe links found to test — not a verdict).
 
 /// What a page's recipe looks like once read. `yield_text` is the page's
 /// own wording ("Makes 12", "4 servings") kept for display, because
@@ -623,7 +669,8 @@ mod tests {
                         d.steps.len(),
                         d.image_url.is_some()
                     );
-                    if d.ingredient_lines.len() < 3 || d.steps.is_empty() || d.image_url.is_none() {
+                    let needs_method = site.note.is_none();
+                    if d.ingredient_lines.len() < 3 || (needs_method && d.steps.is_empty()) || d.image_url.is_none() {
                         failures.push(format!("{}: thin result {d:?}", site.name));
                     }
                 }

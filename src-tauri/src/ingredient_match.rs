@@ -88,6 +88,17 @@ fn words(name: &str) -> Vec<String> {
         .collect()
 }
 
+/// The form an ingredient's name is remembered under: the comparable words
+/// (lowercase, filler dropped, singular) put in alphabetical order, so
+/// `Onions`, `fresh onion` and `onion, fresh` are one key and `red onion`
+/// is another.
+pub fn alias_key(name: &str) -> String {
+    let mut w = words(name);
+    w.sort();
+    w.dedup();
+    w.join(" ")
+}
+
 fn score(ingredient: &[String], item: &[String]) -> f64 {
     if ingredient.is_empty() || item.is_empty() {
         return 0.0;
@@ -260,6 +271,19 @@ mod tests {
         assert_eq!(r.suggestions[0].item_id, 1, "the exact one first");
         let again = match_ingredient("Oil", &items.iter().rev().cloned().collect::<Vec<_>>());
         assert_eq!(r, again, "the order of the pantry must not change the answer");
+    }
+
+    #[test]
+    fn alias_keys_ignore_plurals_filler_case_and_word_order() {
+        let key = alias_key("onion");
+        assert_eq!(key, "onion");
+        for same in ["Onions", "fresh onion", "Large ONIONS", "the onion"] {
+            assert_eq!(alias_key(same), key, "{same}");
+        }
+        assert_eq!(alias_key("red onion"), alias_key("Onion, red"));
+        assert_ne!(alias_key("red onion"), alias_key("onion"), "a red onion is not just an onion");
+        assert_eq!(alias_key("of the"), "", "nothing left to remember");
+        assert_eq!(alias_key(""), "");
     }
 
     #[test]

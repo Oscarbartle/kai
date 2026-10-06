@@ -18,6 +18,7 @@
 		name: string;
 		domains: string[];
 		example_url: string;
+		note: string | null;
 	}
 
 	interface RecipeDraft {
@@ -46,6 +47,10 @@
 		name: string;
 		confidence: 'strong' | 'check' | 'none';
 		suggestions: Suggestion[];
+		/** The top suggestion is what the user chose for this wording before. */
+		learned: boolean;
+		/** The name looks like a pantry staple — the default for "perishable". */
+		likely_non_perishable: boolean;
 	}
 
 	interface Analysis {
@@ -75,6 +80,7 @@
 
 	let step: 'preview' | 'review' | 'wizard' = $state('preview');
 	let wizItems: WizItem[] = $state([]);
+	let allTags: string[] = $state([]);
 	let analyzing = $state(false);
 	let saving = $state(false);
 	let items: { id: number; name: string }[] = $state([]);
@@ -157,6 +163,7 @@
 		if (row.choice === 'new') return { text: 'New item', kind: 'new' };
 		const best = row.suggestions[0];
 		if (best && chosenItemId(row) === best.item_id) {
+			if (row.learned) return { text: '✓ Remembered', kind: 'good' };
 			if (row.confidence === 'strong') return { text: '✓ Match', kind: 'good' };
 			if (row.confidence === 'check') return { text: '? Check', kind: 'check' };
 		}
@@ -196,14 +203,18 @@
 	// The ingredients that need setting up as brand-new items, one entry per name
 	// (two lines for "tamari" are one item).
 	let newGroups = $derived.by(() => {
-		const groups = new Map<string, { key: string; name: string; lines: string[] }>();
+		const groups = new Map<string, { key: string; name: string; lines: string[]; staple: boolean }>();
 		for (const r of rows) {
 			if (r.choice !== 'new' || !r.newName.trim()) continue;
 			const key = keyOf(r);
 			if (existingNames.has(key)) continue; // will reuse the existing item
 			const g = groups.get(key);
-			if (g) g.lines.push(r.raw);
-			else groups.set(key, { key, name: r.newName.trim(), lines: [r.raw] });
+			if (g) {
+				g.lines.push(r.raw);
+				g.staple = g.staple || r.likely_non_perishable;
+			} else {
+				groups.set(key, { key, name: r.newName.trim(), lines: [r.raw], staple: r.likely_non_perishable });
+			}
 		}
 		return [...groups.values()];
 	});
@@ -231,16 +242,29 @@
 
 	// Review → wizard. Work already done on an item (products picked, name
 	// changed) is kept if the user goes back and forward again.
-	function goToWizard() {
+	async function goToWizard() {
 		reviewError = validateReview();
 		if (reviewError) return;
+		// Existing tags, offered as suggestions. Not essential: a failure just
+		// means no suggestions.
+		try {
+			allTags = (await invoke<{ name: string }[]>('list_tags')).map((t) => t.name);
+		} catch {
+			allTags = [];
+		}
 		wizItems = newGroups.map(
 			(g) =>
 				wizItems.find((w) => w.key === g.key) ?? {
 					key: g.key,
 					name: g.name,
 					lines: g.lines,
-					perishable: true,
+					// A pantry staple (salt, a spice, a sauce, a tin) starts unticked;
+					// it is only a guess and the wizard says so.
+					perishable: !g.staple,
+					guessedStaple: g.staple,
+					tags: [],
+					tagInput: '',
+					preferred: null,
 					chosen: [],
 					query: g.name,
 					hits: null,
@@ -252,6 +276,16 @@
 				}
 		);
 		step = 'wizard';
+	}
+
+	// Remember this wording → this item, but only when a person made the call:
+	// not a sure match that was simply accepted, and not one already remembered.
+	function learnName(row: Row): string | null {
+		const id = chosenItemId(row);
+		const best = row.suggestions[0];
+		if (id == null || !row.name.trim()) return null;
+		if (best && id === best.item_id && (row.learned || row.confidence === 'strong')) return null;
+		return row.name.trim();
 	}
 
 	async function createRecipe() {
@@ -282,6 +316,12 @@
 								// The wizard may have renamed it.
 								new_item_name: r.choice === 'new' ? (wiz?.name.trim() || r.newName.trim()) : null,
 								new_item_perishable: wiz ? wiz.perishable : null,
+								new_item_tags: wiz ? wiz.tags : [],
+								new_item_preferred_sku:
+									wiz?.preferred && wiz.chosen.some((c) => c.code === wiz.preferred && c.status === 'ready')
+										? wiz.preferred
+										: null,
+								learn_name: r.choice === 'new' ? null : learnName(r),
 								new_item_skus: wiz
 									? wiz.chosen.filter((c) => c.status === 'ready' && c.sku).map((c) => c.sku)
 									: [],
@@ -354,6 +394,7 @@
 					>
 						{site.name}
 						<span class="domain">{site.domains[0]}</span>
+						{#if site.note}<span class="site-note">· {site.note}</span>{/if}
 					</button>
 				{/each}
 				<span class="sites-note">More can be added once they've been checked.</span>
@@ -418,6 +459,7 @@
 			<NewItemWizard
 				bind:items={wizItems}
 				{existingNames}
+				{allTags}
 				{saving}
 				error={reviewError}
 				onback={() => {
@@ -685,6 +727,12 @@
 		color: #999;
 		font-weight: normal;
 		margin-left: 0.3rem;
+	}
+
+	.site-note {
+		color: var(--color-warning, #c99a3d);
+		font-weight: normal;
+		margin-left: 0.2rem;
 	}
 
 	.sites-note {

@@ -13,6 +13,7 @@
 //! domains), and makes the `commands.rs` rewrite read as "call the
 //! same-named backend method" rather than a real rename.
 
+mod aliases;
 mod items;
 mod local;
 mod recipe_items;
@@ -24,6 +25,7 @@ mod shopping_lists;
 mod skus;
 mod tags;
 
+pub use aliases::AliasesBackend;
 pub use items::ItemsBackend;
 pub use local::LocalBackend;
 pub use recipe_items::RecipeItemsBackend;
@@ -39,6 +41,7 @@ pub use tags::TagsBackend;
 /// it's actually backed by local SQLite or a remote server.
 pub trait Backend:
     ItemsBackend
+    + AliasesBackend
     + SkusBackend
     + TagsBackend
     + RecipesBackend
@@ -53,6 +56,7 @@ pub trait Backend:
 
 impl<T> Backend for T where
     T: ItemsBackend
+        + AliasesBackend
         + SkusBackend
         + TagsBackend
         + RecipesBackend

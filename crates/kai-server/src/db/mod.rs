@@ -1,4 +1,5 @@
 pub mod export;
+pub mod ingredient_aliases;
 pub mod items;
 pub mod recipe_items;
 pub mod recipes;

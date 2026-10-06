@@ -6,6 +6,7 @@
 //! (see CLAUDE.md — Unraid/Postgres later), that's a swap at the
 //! repository boundary, not a rewrite of the schema or the commands.
 
+pub mod ingredient_aliases;
 pub mod items;
 pub mod recipe_items;
 pub mod recipes;
@@ -285,6 +286,17 @@ pub(crate) fn migrations() -> Migrations<'static> {
         // a guess that's cheap to recompute and would just go stale if
         // the guessing logic ever improves).
         M::up("ALTER TABLE tags ADD COLUMN emoji TEXT;"),
+        // What the recipe importer has learned: "when a recipe says X, it
+        // means this item". The alias is the ingredient's normalised name;
+        // it goes with its item.
+        M::up(
+            "
+            CREATE TABLE ingredient_aliases (
+                alias   TEXT PRIMARY KEY COLLATE NOCASE,
+                item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE
+            );
+            ",
+        ),
     ])
 }
 

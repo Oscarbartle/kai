@@ -55,6 +55,12 @@
 		name: string;
 		lines: string[];
 		perishable: boolean;
+		/** "Perishable" was pre-set to off from the name alone, so the screen says it was a guess. */
+		guessedStaple: boolean;
+		tags: string[];
+		tagInput: string;
+		/** Stock code of the product to prefer (★) — one of `chosen`, or none. */
+		preferred: string | null;
 		chosen: Chosen[];
 		query: string;
 		hits: Hit[] | null;
@@ -73,6 +79,7 @@
 	let {
 		items = $bindable(),
 		existingNames,
+		allTags,
 		saving,
 		error,
 		onback,
@@ -80,6 +87,8 @@
 	}: {
 		items: WizItem[];
 		existingNames: Set<string>;
+		/** Every tag that already exists, offered as suggestions. */
+		allTags: string[];
 		saving: boolean;
 		error: string | null;
 		onback: () => void;
@@ -139,6 +148,7 @@
 		const already = it.chosen.find((c) => c.code === hit.sku);
 		if (already) {
 			it.chosen = it.chosen.filter((c) => c.code !== hit.sku);
+			fixPreferred(it);
 			return;
 		}
 		it.chosen = [...it.chosen, { code: hit.sku, hit, status: 'loading', error: null, sku: null }];
@@ -146,8 +156,31 @@
 		await loadFull(it.chosen[it.chosen.length - 1]);
 	}
 
+	// The ★ can only sit on a product that is still chosen.
+	function fixPreferred(it: WizItem) {
+		if (it.preferred && !it.chosen.some((c) => c.code === it.preferred)) it.preferred = null;
+	}
+
 	function remove(it: WizItem, code: string) {
 		it.chosen = it.chosen.filter((c) => c.code !== code);
+		fixPreferred(it);
+	}
+
+	function togglePreferred(it: WizItem, code: string) {
+		it.preferred = it.preferred === code ? null : code;
+	}
+
+	// Typed text becomes a chip on Enter, a comma, or leaving the box.
+	function addTags(it: WizItem) {
+		for (const piece of it.tagInput.split(',')) {
+			const name = piece.trim();
+			if (name && !it.tags.some((t) => t.toLowerCase() === name.toLowerCase())) it.tags = [...it.tags, name];
+		}
+		it.tagInput = '';
+	}
+
+	function removeTag(it: WizItem, name: string) {
+		it.tags = it.tags.filter((t) => t !== name);
 	}
 
 	async function addManual(it: WizItem) {
@@ -214,6 +247,9 @@
 				<span>
 					<strong>Perishable</strong>
 					<small>Tick for fresh things. Untick for salt, spices, tins: they're left off the shopping list when this recipe is added to one.</small>
+					{#if item.guessedStaple}
+						<small class="guess">Unticked because the name looks like a pantry staple — change it if that's wrong.</small>
+					{/if}
 				</span>
 			</label>
 		</div>
@@ -224,6 +260,37 @@
 				created and no product is added.
 			</p>
 		{:else}
+			<h5>Tags</h5>
+			<div class="tags">
+				{#each item.tags as tag (tag)}
+					<span class="tag">
+						{tag}
+						<button class="x" aria-label="Remove the tag {tag}" onclick={() => removeTag(item, tag)}>✕</button>
+					</span>
+				{/each}
+				<input
+					class="tag-input"
+					type="text"
+					list="wizard-tags"
+					placeholder={item.tags.length ? 'Add another…' : 'Add a tag (Enter or comma)'}
+					aria-label="Add a tag"
+					bind:value={item.tagInput}
+					onkeydown={(e) => {
+						if (e.key === 'Enter') {
+							e.preventDefault();
+							addTags(item);
+						}
+					}}
+					oninput={() => item.tagInput.includes(',') && addTags(item)}
+					onblur={() => addTags(item)}
+				/>
+				<datalist id="wizard-tags">
+					{#each allTags.filter((t) => !item.tags.some((x) => x.toLowerCase() === t.toLowerCase())) as t (t)}
+						<option value={t}></option>
+					{/each}
+				</datalist>
+			</div>
+
 			<h5>Woolworths products</h5>
 
 			{#if item.chosen.length}
@@ -253,6 +320,17 @@
 									<span class="muted">No allergens listed</span>
 								{/if}
 							</div>
+							{#if item.chosen.length > 1}
+								<button
+									class="star"
+									class:on={item.preferred === c.code}
+									aria-label={item.preferred === c.code ? 'Not the preferred product' : 'Make this the preferred product'}
+									title="Preferred: the one picked first when this item goes on a list"
+									onclick={() => togglePreferred(item, c.code)}
+								>
+									{item.preferred === c.code ? '★' : '☆'}
+								</button>
+							{/if}
 							<button class="x" aria-label="Remove this product" onclick={() => remove(item, c.code)}>✕</button>
 						</li>
 					{/each}
@@ -457,6 +535,54 @@
 		color: #888;
 		font-size: 0.75rem;
 		line-height: 1.4;
+	}
+
+	.guess {
+		color: var(--color-warning, #c99a3d);
+	}
+
+	.tags {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.4rem;
+	}
+
+	.tag {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		background: #2b3d4a;
+		border-radius: 999px;
+		color: #cfe3f1;
+		font-size: 0.8rem;
+		padding: 0.2rem 0.3rem 0.2rem 0.7rem;
+	}
+
+	.tag .x {
+		font-size: 0.75rem;
+		color: #9fb4c2;
+	}
+
+	.tag-input {
+		flex: 1 1 12rem;
+		width: auto;
+		min-width: 10rem;
+	}
+
+	.star {
+		flex: 0 0 auto;
+		background: none;
+		border: none;
+		color: #999;
+		cursor: pointer;
+		font-size: 1.15rem;
+		line-height: 1;
+		padding: 0 0.2rem;
+	}
+
+	.star.on {
+		color: #f0c24b;
 	}
 
 	h5 {

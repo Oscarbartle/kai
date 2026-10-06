@@ -13,7 +13,7 @@
 //! just in the plan each side was written from.
 
 use kai_lib::backend::{
-    ItemsBackend, RecipeItemsBackend, RecipesBackend, RemoteBackend, SettingsBackend,
+    AliasesBackend, ItemsBackend, RecipeItemsBackend, RecipesBackend, RemoteBackend, SettingsBackend,
     ShoppingListItemsBackend, ShoppingListsBackend, SkusBackend, TagsBackend,
 };
 use kai_shared::skus::{Sku, SkuPrice, SkuQuantity, SkuSize};
@@ -117,6 +117,16 @@ async fn remote_backend_round_trips_against_a_real_server() {
     let tag = remote.add_tag_to_item(onion.id, "Produce").await.expect("add tag");
     let tags_for_item = remote.list_tags_for_item(onion.id).await.expect("list tags");
     assert!(tags_for_item.iter().any(|t| t.id == tag.id));
+
+    // --- Learned ingredient wordings (a table added in migration V2) ---
+    remote.set_ingredient_alias("onion", onion.id).await.expect("remember a wording");
+    remote.set_ingredient_alias(" ONION ", onion.id).await.expect("the same wording again is an update, not a clash");
+    let learned = remote.list_ingredient_aliases().await.expect("list aliases");
+    assert_eq!(learned.len(), 1, "one wording, however it was capitalised: {learned:?}");
+    assert_eq!((learned[0].alias.as_str(), learned[0].item_id), ("onion", onion.id));
+    let empty = remote.set_ingredient_alias("  ", onion.id).await.unwrap_err();
+    assert!(empty.contains("can't be empty"), "the server's own message should surface: {empty}");
+    assert!(remote.set_ingredient_alias("ghost", 999_999).await.is_err(), "an alias must point at a real item");
 
     // --- Recipes + ingredients ---
     let soup = remote.create_recipe("Soup").await.expect("create recipe");
@@ -251,6 +261,10 @@ async fn remote_backend_round_trips_against_a_real_server() {
     assert!(guard_err.contains("Soup"), "guard error should name the blocking recipe: {guard_err}");
     remote.remove_item_from_recipe(soup.id, onion.id).await.expect("unlink");
     remote.delete_item(onion.id).await.expect("delete now unlinked item");
+    assert!(
+        remote.list_ingredient_aliases().await.unwrap().is_empty(),
+        "deleting an item takes its learned wordings with it"
+    );
     remote.delete_recipe(soup.id).await.expect("delete recipe");
 
     // --- Auth: a wrong token should fail with the real 401, surfaced as

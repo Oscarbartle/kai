@@ -327,6 +327,42 @@ fn clean_name(s: &str, packaged: bool) -> String {
     }
 }
 
+/// Words that mean something shelf-stable. Used only to *guess* the default
+/// of the "perishable" tick for a new item; the user always has the last word.
+const STAPLE_WORDS: &[&str] = &[
+    "salt", "sugar", "flour", "cornflour", "cornstarch", "vinegar", "oil", "honey", "syrup", "rice",
+    "pasta", "noodle", "lentil", "oat", "cumin", "paprika", "turmeric", "cinnamon", "nutmeg",
+    "oregano", "cardamom", "spice", "seasoning", "powder", "extract", "essence", "sauce", "paste",
+    "stock", "bouillon", "mustard", "ketchup", "mayonnaise", "tamari", "peppercorn", "tinned",
+    "canned", "jarred", "dried",
+];
+
+const MEAT_WORDS: &[&str] = &[
+    "beef", "chicken", "pork", "lamb", "turkey", "mince", "bacon", "ham", "sausage", "fish", "salmon",
+    "steak", "duck", "veal",
+];
+
+/// Does this look like a pantry staple (salt, spices, sauces, tins, flour…)
+/// rather than something fresh? A guess from the name alone — conservative
+/// where a word is ambiguous: plain `pepper` could be a capsicum, and
+/// `ground` is a spice (`ground cumin`) or mince (`ground beef`).
+pub fn looks_non_perishable(name: &str) -> bool {
+    let words: Vec<String> = name
+        .to_ascii_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(|w| w.trim_end_matches('s').to_string())
+        .collect();
+    let has = |w: &str| words.iter().any(|x| x == w);
+    if STAPLE_WORDS.iter().any(|w| has(w)) {
+        return true;
+    }
+    if has("pepper") && (has("black") || has("white") || has("ground") || has("cracked")) {
+        return true;
+    }
+    has("ground") && !MEAT_WORDS.iter().any(|w| has(w))
+}
+
 fn round_amount(x: f64) -> f64 {
     if x >= 100.0 {
         x.round()
@@ -669,6 +705,26 @@ mod tests {
     fn html_free_punctuation_and_spacing_is_tidied() {
         assert_eq!(p("  2   tbsp\u{a0}olive   oil  ").2, "Olive oil");
         assert_eq!(parse_ingredient_line("2 tbsp olive oil").raw, "2 tbsp olive oil");
+    }
+
+    #[test]
+    fn guesses_which_new_items_are_pantry_staples() {
+        for staple in [
+            "Salt", "Sea salt", "Caster sugar", "Plain flour", "Olive oil", "Rice vinegar", "Soy sauce",
+            "Fish sauce", "Chicken stock", "Tomato paste", "Curry powder", "Ground cumin", "Ground coriander",
+            "Dried mint", "Ground black pepper", "Black peppercorns", "Canned tomatoes", "Tinned chickpeas",
+            "Oats", "Basmati rice", "Spaghetti pasta", "Vanilla essence", "Dijon mustard", "Honey", "Tamari",
+            "Garlic powder", "Cinnamon sticks", "Cornflour",
+        ] {
+            assert!(looks_non_perishable(staple), "{staple} should look like a staple");
+        }
+        for fresh in [
+            "Onion", "Garlic", "Coriander", "Fresh coriander", "Ground beef", "Ground chicken", "Chicken thighs",
+            "Milk", "Eggs", "Red capsicum", "Pepper", "Carrots", "Lemon", "Spring onions", "Butter", "Basil",
+            "Salmon fillets", "Mushrooms", "", "   ",
+        ] {
+            assert!(!looks_non_perishable(fresh), "{fresh} should not look like a staple");
+        }
     }
 
     #[test]

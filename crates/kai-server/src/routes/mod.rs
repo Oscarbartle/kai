@@ -1,5 +1,6 @@
 mod export;
 mod health;
+mod ingredient_aliases;
 mod items;
 mod overview;
 mod recipe_items;
@@ -28,6 +29,7 @@ pub fn build(state: AppState, shared_token: String) -> Router {
         .merge(items::router())
         .merge(overview::router())
         .merge(export::router())
+        .merge(ingredient_aliases::router())
         .merge(skus::router())
         .merge(tags::router())
         .merge(recipes::router())

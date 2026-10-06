@@ -4,6 +4,7 @@
 //! is entirely in how each call reaches the data, not what it returns —
 //! `commands.rs` doesn't know or care which one it's talking to.
 
+use super::aliases::AliasesBackend;
 use super::items::ItemsBackend;
 use super::recipe_items::RecipeItemsBackend;
 use super::recipes::RecipesBackend;
@@ -12,6 +13,7 @@ use super::shopping_list_items::ShoppingListItemsBackend;
 use super::shopping_lists::ShoppingListsBackend;
 use super::skus::SkusBackend;
 use super::tags::TagsBackend;
+use crate::db::ingredient_aliases::IngredientAlias;
 use crate::db::items::Item;
 use crate::db::recipe_items::RecipeIngredient;
 use crate::db::recipes::Recipe;
@@ -411,6 +413,16 @@ impl ShoppingListItemsBackend for RemoteBackend {
     }
     async fn cheapest_sku_id(&self, item_id: i64) -> Result<Option<i64>, String> {
         self.get(&format!("/items/{item_id}/cheapest-sku")).await
+    }
+}
+
+#[async_trait]
+impl AliasesBackend for RemoteBackend {
+    async fn list_ingredient_aliases(&self) -> Result<Vec<IngredientAlias>, String> {
+        self.get("/ingredient-aliases").await
+    }
+    async fn set_ingredient_alias(&self, alias: &str, item_id: i64) -> Result<(), String> {
+        self.post_unit("/ingredient-aliases", &json!({ "alias": alias, "item_id": item_id })).await
     }
 }
 
