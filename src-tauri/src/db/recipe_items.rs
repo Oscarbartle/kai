@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 // RecipeIngredient/VALID_UNITS moved to kai-shared (Phase B) — see
 // crates/kai-shared/src/recipe_items.rs.
@@ -57,9 +57,43 @@ pub fn set_quantity(
     get(conn, recipe_id, item_id)
 }
 
+/// Pins one of the item's own SKUs to this recipe ingredient, or clears
+/// the pin with `None`. A SKU of a different item is refused — a pin that
+/// pointed elsewhere would put the wrong product on a list.
+pub fn set_sku(
+    conn: &Connection,
+    recipe_id: i64,
+    item_id: i64,
+    sku_id: Option<i64>,
+) -> Result<RecipeIngredient, String> {
+    if let Some(sku_id) = sku_id {
+        let owner: Option<i64> = conn
+            .query_row("SELECT item_id FROM skus WHERE id = ?1", params![sku_id], |row| row.get(0))
+            .optional()
+            .map_err(|e| format!("Couldn't check SKU {sku_id}: {e}"))?;
+        match owner {
+            None => return Err(format!("No SKU with id {sku_id}")),
+            Some(owner) if owner != item_id => {
+                return Err(format!("SKU {sku_id} isn't one of item {item_id}'s SKUs"))
+            }
+            Some(_) => {}
+        }
+    }
+    let changed = conn
+        .execute(
+            "UPDATE recipe_items SET sku_id = ?1 WHERE recipe_id = ?2 AND item_id = ?3",
+            params![sku_id, recipe_id, item_id],
+        )
+        .map_err(|e| format!("Couldn't pin a SKU for item {item_id} on recipe {recipe_id}: {e}"))?;
+    if changed == 0 {
+        return Err(format!("Item {item_id} isn't linked to recipe {recipe_id}"));
+    }
+    get(conn, recipe_id, item_id)
+}
+
 fn get(conn: &Connection, recipe_id: i64, item_id: i64) -> Result<RecipeIngredient, String> {
     conn.query_row(
-        "SELECT items.id, items.name, recipe_items.amount, recipe_items.unit
+        "SELECT items.id, items.name, recipe_items.amount, recipe_items.unit, recipe_items.sku_id
          FROM recipe_items
          JOIN items ON items.id = recipe_items.item_id
          WHERE recipe_items.recipe_id = ?1 AND recipe_items.item_id = ?2",
@@ -70,6 +104,7 @@ fn get(conn: &Connection, recipe_id: i64, item_id: i64) -> Result<RecipeIngredie
                 name: row.get(1)?,
                 amount: row.get(2)?,
                 unit: row.get(3)?,
+                sku_id: row.get(4)?,
             })
         },
     )
@@ -102,7 +137,7 @@ pub fn list_recipes_for_item(conn: &Connection, item_id: i64) -> Result<Vec<Stri
 pub fn list_for_recipe(conn: &Connection, recipe_id: i64) -> Result<Vec<RecipeIngredient>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT items.id, items.name, recipe_items.amount, recipe_items.unit
+            "SELECT items.id, items.name, recipe_items.amount, recipe_items.unit, recipe_items.sku_id
              FROM recipe_items
              JOIN items ON items.id = recipe_items.item_id
              WHERE recipe_items.recipe_id = ?1
@@ -117,6 +152,7 @@ pub fn list_for_recipe(conn: &Connection, recipe_id: i64) -> Result<Vec<RecipeIn
                 name: row.get(1)?,
                 amount: row.get(2)?,
                 unit: row.get(3)?,
+                sku_id: row.get(4)?,
             })
         })
         .map_err(|e| format!("Couldn't list items for recipe {recipe_id}: {e}"))?;

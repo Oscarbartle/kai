@@ -194,6 +194,14 @@ impl RecipeItemsBackend for LocalBackend {
     ) -> Result<RecipeIngredient, String> {
         recipe_items::set_quantity(&*self.lock()?, recipe_id, item_id, amount, unit)
     }
+    async fn set_recipe_item_sku(
+        &self,
+        recipe_id: i64,
+        item_id: i64,
+        sku_id: Option<i64>,
+    ) -> Result<RecipeIngredient, String> {
+        recipe_items::set_sku(&*self.lock()?, recipe_id, item_id, sku_id)
+    }
     async fn list_recipes_for_item(&self, item_id: i64) -> Result<Vec<String>, String> {
         recipe_items::list_recipes_for_item(&*self.lock()?, item_id)
     }

@@ -319,6 +319,18 @@ impl RecipeItemsBackend for RemoteBackend {
         )
         .await
     }
+    async fn set_recipe_item_sku(
+        &self,
+        recipe_id: i64,
+        item_id: i64,
+        sku_id: Option<i64>,
+    ) -> Result<RecipeIngredient, String> {
+        self.patch(
+            &format!("/recipes/{recipe_id}/items/{item_id}/sku"),
+            &json!({ "sku_id": sku_id }),
+        )
+        .await
+    }
     async fn list_recipes_for_item(&self, item_id: i64) -> Result<Vec<String>, String> {
         self.get(&format!("/items/{item_id}/recipes")).await
     }

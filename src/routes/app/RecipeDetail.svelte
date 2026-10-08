@@ -9,6 +9,9 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { tick } from 'svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
+	import { sizeLabel } from './skuSize';
+	import { titleCase } from './titleCase';
+	import { pinOptionLabel, autoPickLabel, type PinSku } from './recipeSkuPin';
 
 	interface DbRecipe {
 		id: number;
@@ -36,6 +39,8 @@
 		name: string;
 		amount: number | null;
 		unit: string | null;
+		/** A SKU pinned for this recipe — wins over the item's ★ and cheapest. */
+		sku_id: number | null;
 	}
 
 	// Sidebar picker — same drag-and-drop pattern as
@@ -124,6 +129,21 @@
 	let tagInput: string = $state('');
 	let tagError: string | null = $state(null);
 	let ingredients: Ingredient[] = $state([]);
+	// Each ingredient's item's SKUs, for the pin selector. Fetched once per item.
+	let skusByItem: Record<number, PinSku[]> = $state({});
+
+	async function ensureSkus() {
+		const missing = [...new Set(ingredients.map((i) => i.item_id))].filter((id) => !(id in skusByItem));
+		await Promise.all(
+			missing.map(async (itemId) => {
+				try {
+					skusByItem[itemId] = await invoke<PinSku[]>('list_skus_for_item', { itemId });
+				} catch (e) {
+					itemError = String(e);
+				}
+			})
+		);
+	}
 	let itemError: string | null = $state(null);
 	let error: string | null = $state(null);
 
@@ -138,6 +158,7 @@
 		} catch (e) {
 			error = String(e);
 		}
+		await ensureSkus();
 	}
 
 	load();
@@ -146,6 +167,7 @@
 	async function loadIngredients() {
 		try {
 			ingredients = await invoke<Ingredient[]>('list_recipe_ingredients', { recipeId: recipe.id });
+			await ensureSkus();
 		} catch (e) {
 			itemError = String(e);
 		}
@@ -329,6 +351,27 @@
 		}
 	}
 
+	// Pins a SKU to this ingredient ('' = back to automatic). If the save
+	// fails the dropdown is put back by hand: the stored pin never changed,
+	// so Svelte has nothing to re-render and it would keep showing a choice
+	// that wasn't saved.
+	async function pinSku(ingredient: Ingredient, el: HTMLSelectElement) {
+		itemError = null;
+		const previous = ingredient.sku_id;
+		const skuId = el.value === '' ? null : Number(el.value);
+		try {
+			const updated = await invoke<Ingredient>('set_recipe_item_sku', {
+				recipeId: recipe.id,
+				itemId: ingredient.item_id,
+				skuId
+			});
+			ingredient.sku_id = updated.sku_id;
+		} catch (e) {
+			itemError = String(e);
+			el.value = previous == null ? '' : String(previous);
+		}
+	}
+
 	async function deleteRecipe() {
 		try {
 			await invoke('delete_recipe', { recipeId: recipe.id });
@@ -486,6 +529,7 @@
 		>
 			{#each ingredients as ingredient (ingredient.item_id)}
 				{@const pick = pickerItems.find((p) => p.item.id === ingredient.item_id)}
+				{@const skus = skusByItem[ingredient.item_id] ?? []}
 				<div class="dropped-card">
 					<button
 						class="remove-btn"
@@ -524,6 +568,20 @@
 							{/each}
 						</select>
 					</div>
+					<select
+						class="ingredient-sku"
+						class:pinned={ingredient.sku_id != null}
+						aria-label="SKU to buy for this ingredient"
+						title="Which product to put on a shopping list for this recipe. Beats the item's ★ preferred SKU."
+						disabled={skus.length === 0}
+						value={ingredient.sku_id ?? ''}
+						onchange={(e) => pinSku(ingredient, e.currentTarget)}
+					>
+						<option value="">{skus.length === 0 ? 'No SKUs linked' : autoPickLabel(skus)}</option>
+						{#each skus as s (s.id)}
+							<option value={s.id}>{pinOptionLabel(s, sizeLabel, titleCase)}</option>
+						{/each}
+					</select>
 				</div>
 			{:else}
 				<p class="drop-zone-message">Drag items here from the sidebar</p>
@@ -1099,6 +1157,30 @@
 		background: #1e1e1d;
 		color: #fff;
 		font-size: 0.8rem;
+	}
+
+	.ingredient-sku {
+		box-sizing: border-box;
+		width: 100%;
+		margin-top: 0.5rem;
+		padding: 0.3rem 0.5rem;
+		border-radius: 6px;
+		border: 1px solid #444;
+		background: #1e1e1d;
+		color: #aaa;
+		font-size: 0.78rem;
+	}
+
+	/* A pin is an override of the usual pick — make it unmistakable. */
+	.ingredient-sku.pinned {
+		border-color: #52677a;
+		background: #26323a;
+		color: #fff;
+		font-weight: 600;
+	}
+
+	.ingredient-sku:disabled {
+		opacity: 0.5;
 	}
 
 	.method {

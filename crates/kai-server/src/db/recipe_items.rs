@@ -37,10 +37,45 @@ pub async fn remove(client: &Client, recipe_id: i64, item_id: i64) -> Result<(),
     Ok(())
 }
 
+/// Pins one of the item's own SKUs to this recipe ingredient, or clears the
+/// pin with `None`. A SKU of a different item is refused.
+pub async fn set_sku(
+    client: &Client,
+    recipe_id: i64,
+    item_id: i64,
+    sku_id: Option<i64>,
+) -> Result<RecipeIngredient, String> {
+    if let Some(sku_id) = sku_id {
+        let owner: Option<i64> = client
+            .query_opt("SELECT item_id FROM skus WHERE id = $1", &[&sku_id])
+            .await
+            .map_err(|e| format!("Couldn't check SKU {sku_id}: {e}"))?
+            .map(|row| row.get(0));
+        match owner {
+            None => return Err(format!("No SKU with id {sku_id}")),
+            Some(owner) if owner != item_id => {
+                return Err(format!("SKU {sku_id} isn't one of item {item_id}'s SKUs"))
+            }
+            Some(_) => {}
+        }
+    }
+    let changed = client
+        .execute(
+            "UPDATE recipe_items SET sku_id = $1 WHERE recipe_id = $2 AND item_id = $3",
+            &[&sku_id, &recipe_id, &item_id],
+        )
+        .await
+        .map_err(|e| format!("Couldn't pin a SKU for item {item_id} on recipe {recipe_id}: {e}"))?;
+    if changed == 0 {
+        return Err(format!("Item {item_id} isn't linked to recipe {recipe_id}"));
+    }
+    get_ingredient(client, recipe_id, item_id).await
+}
+
 async fn get_ingredient(client: &Client, recipe_id: i64, item_id: i64) -> Result<RecipeIngredient, String> {
     let row = client
         .query_one(
-            "SELECT items.id, items.name, recipe_items.amount, recipe_items.unit
+            "SELECT items.id, items.name, recipe_items.amount, recipe_items.unit, recipe_items.sku_id
              FROM recipe_items
              JOIN items ON items.id = recipe_items.item_id
              WHERE recipe_items.recipe_id = $1 AND recipe_items.item_id = $2",
@@ -53,6 +88,7 @@ async fn get_ingredient(client: &Client, recipe_id: i64, item_id: i64) -> Result
         name: row.get(1),
         amount: row.get(2),
         unit: row.get(3),
+        sku_id: row.get(4),
     })
 }
 
@@ -98,7 +134,7 @@ pub async fn list_recipes_for_item(client: &Client, item_id: i64) -> Result<Vec<
 pub async fn list_for_recipe(client: &Client, recipe_id: i64) -> Result<Vec<RecipeIngredient>, String> {
     let rows = client
         .query(
-            "SELECT items.id, items.name, recipe_items.amount, recipe_items.unit
+            "SELECT items.id, items.name, recipe_items.amount, recipe_items.unit, recipe_items.sku_id
              FROM recipe_items
              JOIN items ON items.id = recipe_items.item_id
              WHERE recipe_items.recipe_id = $1
@@ -114,6 +150,7 @@ pub async fn list_for_recipe(client: &Client, recipe_id: i64) -> Result<Vec<Reci
             name: row.get(1),
             amount: row.get(2),
             unit: row.get(3),
+            sku_id: row.get(4),
         })
         .collect())
 }

@@ -1170,6 +1170,23 @@ Read with `git show python-v1-final:<path>`.
     shopping-list lines); doesn't retroactively change a SKU already
     resolved onto an existing line — same as toggling `cheapest_by`
     itself doesn't.
+  - **Recipe SKU pin — trumps the preferred SKU, for that recipe's lines
+    only.** A recipe ingredient can pin one of its item's SKUs
+    (`recipe_items.sku_id`, nullable, `ON DELETE SET NULL` — deleting the SKU
+    just clears the pin; SQLite migration + server `V4__recipe_item_sku.sql`).
+    Chosen in the Recipe Book ingredient card's selector ("Auto — ★ 750g" /
+    "Auto — cheapest" / a specific SKU, shown with size and price); a pinned
+    one is highlighted. Order of precedence for a recipe's new line: **recipe
+    pin > item's ★ preferred SKU > cheapest** (`add_item_pinned` in
+    `db::shopping_list_items`, both backends). Rules: the pin must be one of
+    that item's own SKUs (refused otherwise); it only applies when a line is
+    *created* — an existing line being merged into keeps its SKU, same as the
+    ★; a plain item-drop never uses a recipe's pin; the phone gets it for free
+    (the server does the expansion) but can't set it. Chosen over an automatic
+    "best pack mix at checkout" because a pin says *which product* (5% vs 13%
+    fat, brand), which a price-only optimiser can't know; the optimiser
+    (combining packs across recipes, e.g. 500g + 500g → 1kg) is a possible
+    later addition for lines with no pin.
 - **Buy-quantity calculation — split across two places, neither called
   "buyQuantity()" anymore.** Originally a single frontend helper in the
   old flat `/shopping-list` page (removed once `/app` fully replaced it

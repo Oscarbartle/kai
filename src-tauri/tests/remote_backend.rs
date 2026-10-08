@@ -224,6 +224,42 @@ async fn remote_backend_round_trips_against_a_real_server() {
 
     remote.remove_shopping_list_item(on_list[0].id).await.expect("remove line");
 
+    // --- A SKU pinned to a recipe ingredient (migration V4) outranks the
+    //     normal pick, and the server enforces its rules ---
+    let mut dearer = fixture_sku();
+    dearer.sku = "999".to_string();
+    dearer.price.sale_price = Some(9.0);
+    dearer.price.original_price = Some(9.0);
+    dearer.price.is_special = false;
+    let dear = remote.save_sku_to_item(onion.id, &dearer).await.expect("a dearer SKU");
+    assert_eq!(remote.cheapest_sku_id(onion.id).await.unwrap(), Some(stored.id), "unpinned, the cheaper SKU is the pick");
+    let pinned = remote.set_recipe_item_sku(soup.id, onion.id, Some(dear.id)).await.expect("pin a SKU");
+    assert_eq!(pinned.sku_id, Some(dear.id));
+    let listed = remote.list_recipe_ingredients(soup.id).await.unwrap();
+    assert_eq!(listed[0].sku_id, Some(dear.id), "the pin comes back with the ingredient");
+    let pinned_list = remote.create_shopping_list("Pinned").await.expect("second list");
+    let pinned_lines = remote
+        .add_recipe_to_shopping_list(pinned_list.id, soup.id, None)
+        .await
+        .expect("expand with the pin");
+    assert_eq!(
+        pinned_lines[0].sku.as_ref().map(|k| k.id),
+        Some(dear.id),
+        "the recipe's pin beats the cheaper SKU"
+    );
+    let garlic_sku = remote.save_sku_to_item(garlic.id, &fixture_sku()).await.expect("garlic SKU");
+    let foreign = remote
+        .set_recipe_item_sku(soup.id, onion.id, Some(garlic_sku.id))
+        .await
+        .expect_err("another item's SKU must be refused");
+    assert!(foreign.contains("isn't one of"), "the server's own message should surface: {foreign}");
+    remote.delete_sku(dear.id).await.expect("delete the pinned SKU");
+    assert_eq!(
+        remote.list_recipe_ingredients(soup.id).await.unwrap()[0].sku_id,
+        None,
+        "deleting the SKU clears the pin (ON DELETE SET NULL)"
+    );
+
     // clear_shopping_list — the "Clear list" button's command. Re-add a
     // line first so there's something real to clear, and confirm the
     // list itself survives (distinct from delete_shopping_list below).

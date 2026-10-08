@@ -121,6 +121,22 @@ pub async fn add_item(
     unit: Option<&str>,
     source_recipe_id: Option<i64>,
 ) -> Result<ShoppingListLine, String> {
+    add_item_pinned(client, list_id, item_id, amount, unit, source_recipe_id, None).await
+}
+
+/// `add_item`, with an optional SKU wanted for a *new* line (a recipe
+/// ingredient's pinned SKU). It outranks the item's starred SKU and the
+/// cheapest-pick; an existing line being merged into keeps its SKU, and a
+/// pin that isn't (any longer) one of this item's SKUs is ignored.
+async fn add_item_pinned(
+    client: &Client,
+    list_id: i64,
+    item_id: i64,
+    amount: Option<f64>,
+    unit: Option<&str>,
+    source_recipe_id: Option<i64>,
+    pinned_sku_id: Option<i64>,
+) -> Result<ShoppingListLine, String> {
     validate_unit(unit)?;
 
     let existing = client
@@ -148,7 +164,18 @@ pub async fn add_item(
         return get(client, line_id).await;
     }
 
-    let sku_id = cheapest_sku_id(client, item_id).await?;
+    let pinned: Option<i64> = match pinned_sku_id {
+        Some(id) => client
+            .query_opt("SELECT id FROM skus WHERE id = $1 AND item_id = $2", &[&id, &item_id])
+            .await
+            .map_err(|e| format!("Couldn't check pinned SKU {id}: {e}"))?
+            .map(|row| row.get(0)),
+        None => None,
+    };
+    let sku_id = match pinned {
+        Some(id) => Some(id),
+        None => cheapest_sku_id(client, item_id).await?,
+    };
     let row = client
         .query_one(
             "INSERT INTO shopping_list_items (list_id, item_id, amount, unit, sku_id, source_recipe_id)
@@ -182,13 +209,14 @@ async fn expand_recipe(
             continue;
         }
         lines.push(
-            add_item(
+            add_item_pinned(
                 client,
                 list_id,
                 ingredient.item_id,
                 Some(amount * scale),
                 Some(unit),
                 Some(recipe_id),
+                ingredient.sku_id,
             )
             .await?,
         );

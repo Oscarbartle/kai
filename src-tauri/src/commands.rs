@@ -280,6 +280,17 @@ pub async fn set_recipe_item_quantity(
 }
 
 #[tauri::command]
+pub async fn set_recipe_item_sku(
+    backend: State<'_, ActiveBackend>,
+    recipe_id: i64,
+    item_id: i64,
+    sku_id: Option<i64>,
+) -> Result<recipe_items::RecipeIngredient, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.set_recipe_item_sku(recipe_id, item_id, sku_id).await
+}
+
+#[tauri::command]
 pub async fn update_recipe_method(
     backend: State<'_, ActiveBackend>,
     recipe_id: i64,

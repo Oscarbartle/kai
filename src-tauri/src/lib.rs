@@ -97,6 +97,7 @@ pub fn run() {
             commands::remove_item_from_recipe,
             commands::list_recipe_ingredients,
             commands::set_recipe_item_quantity,
+            commands::set_recipe_item_sku,
             commands::update_recipe_method,
             commands::update_recipe_servings,
             commands::update_recipe_source_url,
