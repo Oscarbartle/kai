@@ -9,6 +9,7 @@
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import CartAdd from './CartAdd.svelte';
 	import SizeBadge from './SizeBadge.svelte';
+	import { titleCase } from './titleCase';
 	import { parsePackSize, priceSkuGroups } from './shoppingListPricing';
 	import { staleAgeDays } from './skuFreshness';
 
@@ -904,7 +905,7 @@
 						{/if}
 						<div class="sku-info">
 							<p class="sku-name">
-								<span class="sku-name-text">{group.sku.name}</span>
+								<span class="sku-name-text">{titleCase(group.sku.name)}</span>
 								<SizeBadge size={group.sku.size} />
 								<button
 									class="sku-swap-toggle"
@@ -960,7 +961,7 @@
 											Image
 										{/if}
 									</div>
-									<span class="sku-swap-name">{alt.name}</span>
+									<span class="sku-swap-name">{titleCase(alt.name)}</span>
 									<SizeBadge size={alt.size} small />
 									{#if alt.price.sale_price != null}
 										<span class="sku-swap-price">${alt.price.sale_price.toFixed(2)}</span>

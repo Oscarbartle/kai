@@ -12,6 +12,7 @@
 	import PriceHistoryChart from './PriceHistoryChart.svelte';
 	import SizeBadge from './SizeBadge.svelte';
 	import { sizeLabel } from './skuSize';
+	import { titleCase } from './titleCase';
 	import { buildSeries, type PricePoint } from './priceHistory';
 
 	interface DbItem {
@@ -110,7 +111,7 @@
 			skuSlots
 				.filter((s) => s.dbId != null && s.data)
 				.sort((a, b) => (a.dbId as number) - (b.dbId as number))
-				.map((s) => ({ id: s.dbId as number, label: s.data!.name, size: sizeLabel(s.data!.size) }))
+				.map((s) => ({ id: s.dbId as number, label: titleCase(s.data!.name), size: sizeLabel(s.data!.size) }))
 		)
 	);
 
@@ -538,7 +539,7 @@
 						{/if}
 						<div class="sku-info">
 							<p class="sku-name">
-								<span class="sku-name-text">{slot.data.name}</span>
+								<span class="sku-name-text">{titleCase(slot.data.name)}</span>
 								<SizeBadge size={slot.data.size} />
 							</p>
 							{#if slot.saveError}

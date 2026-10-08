@@ -156,8 +156,8 @@
 					class:flip={tip.x > W * 0.62}
 					style={`left:${tip.x}px; top:${tip.y}px`}
 				>
-					<span class="tip-name" style={`color:${tip.series.color}`}>
-						{tip.series.label}
+					<span class="tip-name">
+						<span class="tip-label" style={`color:${tip.series.color}`}>{tip.series.label}</span>
 						<SizeBadge size={tip.series.size} small />
 					</span>
 					<span class="tip-price">
@@ -309,6 +309,7 @@
 		box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
 		font-size: 0.8rem;
 		white-space: nowrap;
+		max-width: min(30rem, 80%);
 		pointer-events: none;
 		z-index: 2;
 	}
@@ -321,8 +322,16 @@
 		display: flex;
 		align-items: center;
 		gap: 0.4rem;
+		min-width: 0;
 		font-weight: 600;
-		max-width: 18rem;
+	}
+
+	/* A very long name is cut with an ellipsis rather than pushing the
+	   badge out of the box. */
+	.tip-label {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.tip-price {

@@ -76,6 +76,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { untrack } from 'svelte';
 	import SizeBadge from './SizeBadge.svelte';
+	import { titleCase } from './titleCase';
 
 	let {
 		items = $bindable(),
@@ -101,7 +102,6 @@
 	let isLast = $derived(index === items.length - 1);
 
 	const money = (n: number | null) => (n == null ? '—' : `$${n.toFixed(2)}`);
-	const titleCase = (s: string) => s.replace(/\b\w/g, (c) => c.toUpperCase());
 
 	// A name that is already in the pantry means this line will simply use that
 	// item — there is nothing to set up, so the product search is switched off.
