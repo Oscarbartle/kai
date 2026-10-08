@@ -7,6 +7,7 @@ import {
 	nearestDot,
 	niceTicks,
 	PALETTE,
+	isToday,
 	MIN_WINDOW,
 	timeDomain,
 	timeTicks,
@@ -99,41 +100,72 @@ test('niceTicks on big and tiny ranges', () => {
 	assert.ok(tiny.ticks.every((t) => Number.isFinite(t)));
 });
 
-test('a young chart is left-weighted: first dot at the left, a week of room', () => {
-	const t0 = Date.parse('2026-10-06T12:00:00Z');
-	const one = buildSeries([pt(1, '2026-10-06T12:00:00Z', 3)], [{ id: 1, label: 'x' }]);
-	const [lo, hi] = timeDomain(one);
-	assert.ok(lo < t0 && t0 - lo < 86_400_000, 'first dot is just inside the left edge');
-	assert.ok(hi - t0 >= MIN_WINDOW, 'a week of room to the right');
-	// A few refreshes the same afternoon stay on the left too.
-	const same = buildSeries([pt(1, '2026-10-06T12:00:00Z', 3), pt(1, '2026-10-06T15:00:00Z', 3.2)], [{ id: 1, label: 'x' }]);
-	const [, hi2] = timeDomain(same);
-	assert.ok(hi2 - Date.parse('2026-10-06T15:00:00Z') > 5 * 86_400_000);
+const NOW = Date.parse('2026-10-08T03:00:00Z');
+
+test('the right edge is the present: the axis runs from the first dot to now', () => {
+	const s = buildSeries([pt(1, '2026-09-20T00:00:00Z', 3), pt(1, '2026-09-25T00:00:00Z', 3)], [{ id: 1, label: 'x' }]);
+	const [lo, hi] = timeDomain(s, NOW);
+	assert.ok(lo < Date.parse('2026-09-20T00:00:00Z') && Date.parse('2026-09-20T00:00:00Z') - lo < 2 * 86_400_000, 'first dot just inside the left edge');
+	assert.ok(hi > NOW && hi - NOW < 2 * 86_400_000, 'now is just inside the right edge, not days of empty future');
+	const ticks = timeTicks(s, 5, NOW);
+	assert.equal(ticks.length, 5);
+	assert.equal(ticks[0], Date.parse('2026-09-20T00:00:00Z'));
+	assert.equal(ticks[4], NOW);
 });
 
-test('an older chart fits its data: window grows past a week, small padding only', () => {
-	const two = buildSeries([pt(1, '2026-09-01T00:00:00Z', 3), pt(1, '2026-10-11T00:00:00Z', 4)], [{ id: 1, label: 'x' }]);
-	const [a, b] = timeDomain(two);
-	const first = Date.parse('2026-09-01T00:00:00Z');
-	const last = Date.parse('2026-10-11T00:00:00Z');
-	assert.ok(a < first && b > last);
-	assert.ok(b - last < 3 * 86_400_000, 'only a hair of room after the last dot');
-	// With no data at all there is still a sane domain.
+test('no empty space before the data once there is more than a day of history', () => {
+	// First dot ~2 days ago: the axis starts at it, not a day earlier.
+	const s = buildSeries([pt(1, '2026-10-06T03:00:00Z', 3), pt(1, '2026-10-08T01:00:00Z', 3)], [{ id: 1, label: 'x' }]);
+	const ticks = timeTicks(s, 5, NOW);
+	assert.equal(ticks[0], Date.parse('2026-10-06T03:00:00Z'));
+	const [lo] = timeDomain(s, NOW);
+	assert.ok(Date.parse('2026-10-06T03:00:00Z') - lo < 0.05 * (NOW - Date.parse('2026-10-06T03:00:00Z')) + 1, 'only the hairline margin');
+});
+
+test('a brand-new item gets a minimum window ending now, its dot at the right', () => {
+	const s = buildSeries([pt(1, '2026-10-08T01:00:00Z', 3)], [{ id: 1, label: 'x' }]);
+	const ticks = timeTicks(s, 5, NOW);
+	assert.equal(ticks[ticks.length - 1], NOW);
+	assert.equal(ticks[ticks.length - 1] - ticks[0], MIN_WINDOW);
+	const [lo, hi] = timeDomain(s, NOW);
+	assert.ok(hi - lo >= MIN_WINDOW);
+	assert.ok(hi - Date.parse('2026-10-08T01:00:00Z') < 0.2 * (hi - lo), 'the dot is at the right-hand end');
+});
+
+test('a short window gets fewer labels so no two neighbours share a date', () => {
+	const s = buildSeries([pt(1, '2026-10-05T03:00:00Z', 3), pt(1, '2026-10-08T01:00:00Z', 3)], [{ id: 1, label: 'x' }]);
+	const ticks = timeTicks(s, 5, NOW);
+	assert.equal(ticks.length, 4, 'a 3-day window: one label per day');
+	for (let i = 1; i < ticks.length; i++) assert.ok(ticks[i] - ticks[i - 1] >= 86_400_000);
+	const day = (t: number) => new Date(t).toDateString();
+	assert.equal(new Set(ticks.map(day)).size, ticks.length, 'every label is a different date');
+});
+
+test('a dot dated after "now" (clock skew) is not cut off', () => {
+	const s = buildSeries([pt(1, '2026-10-01T00:00:00Z', 3), pt(1, '2026-10-09T00:00:00Z', 4)], [{ id: 1, label: 'x' }]);
+	const ticks = timeTicks(s, 5, NOW);
+	assert.equal(ticks[ticks.length - 1], Date.parse('2026-10-09T00:00:00Z'));
+});
+
+test('an item whose price stopped changing still runs to today', () => {
+	// Last dot 20 days ago: the line stops there and the axis carries on to now.
+	const s = buildSeries([pt(1, '2026-09-01T00:00:00Z', 3), pt(1, '2026-09-18T00:00:00Z', 3)], [{ id: 1, label: 'x' }]);
+	const ticks = timeTicks(s, 5, NOW);
+	assert.equal(ticks[ticks.length - 1], NOW);
+});
+
+test('with no data there is still a sane domain and no ticks', () => {
 	const [x, y] = timeDomain([], 1_000_000_000_000);
 	assert.ok(y > x);
+	assert.deepEqual(timeTicks([], 5, NOW), []);
 });
 
-test('x ticks start at the first dot and cover the whole window', () => {
-	const young = buildSeries([pt(1, '2026-10-06T12:00:00Z', 3)], [{ id: 1, label: 'x' }]);
-	const yt = timeTicks(young);
-	assert.equal(yt.length, 5);
-	assert.equal(yt[0], Date.parse('2026-10-06T12:00:00Z'));
-	assert.equal(yt[4] - yt[0], MIN_WINDOW);
-	const old = buildSeries([pt(1, '2026-10-01T00:00:00Z', 3), pt(1, '2026-10-21T00:00:00Z', 4)], [{ id: 1, label: 'x' }]);
-	const ot = timeTicks(old);
-	assert.equal(ot[0], Date.parse('2026-10-01T00:00:00Z'));
-	assert.equal(ot[4], Date.parse('2026-10-21T00:00:00Z'), 'ends under the last dot');
-	assert.deepEqual(timeTicks([]), []);
+test('isToday compares local calendar days', () => {
+	const noon = new Date(2026, 9, 8, 12, 0).getTime();
+	assert.equal(isToday(new Date(2026, 9, 8, 0, 5).getTime(), noon), true);
+	assert.equal(isToday(new Date(2026, 9, 8, 23, 55).getTime(), noon), true);
+	assert.equal(isToday(new Date(2026, 9, 7, 23, 55).getTime(), noon), false);
+	assert.equal(isToday(new Date(2025, 9, 8, 12, 0).getTime(), noon), false);
 });
 
 test('axis labels say only what the span needs', () => {

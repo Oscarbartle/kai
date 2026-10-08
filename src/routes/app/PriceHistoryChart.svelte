@@ -14,6 +14,7 @@
 		formatFull,
 		formatMoney,
 		formatTick,
+		isToday,
 		nearestDot,
 		niceTicks,
 		timeDomain,
@@ -120,7 +121,7 @@
 						y={H - M.b + 18}
 						text-anchor={i === 0 ? 'start' : i === xTicks.length - 1 ? 'end' : 'middle'}
 					>
-						{formatTick(t, dataSpan)}
+						{i === xTicks.length - 1 && isToday(t) ? 'Today' : formatTick(t, dataSpan)}
 					</text>
 				{/each}
 

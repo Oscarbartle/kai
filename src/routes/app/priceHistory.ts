@@ -105,36 +105,49 @@ const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
 /** The chart never shows less than this much time, so a brand-new item
- *  has its first dot at the left with room to grow into, and the chart
- *  fills in from the left as refreshes accumulate. */
-export const MIN_WINDOW = 7 * DAY;
+ *  isn't a lone dot on a zero-width axis. Anything with more than a day of
+ *  history starts exactly at its first dot — no empty space before the data. */
+export const MIN_WINDOW = DAY;
 
 function dataRange(series: Series[]): [number, number] | null {
 	const ts = series.flatMap((s) => s.dots.map((d) => d.t));
 	return ts.length ? [Math.min(...ts), Math.max(...ts)] : null;
 }
 
-/** The x-axis range: starts at the first dot (a hair of margin so it isn't
- *  on the edge), and runs to the last dot or `MIN_WINDOW` after the
- *  first, whichever is later. */
-export function timeDomain(series: Series[], now: number = Date.now()): [number, number] {
+/** What the time axis covers: from the first dot to *now* (so the right
+ *  edge is today, and a price that hasn't changed in a while visibly
+ *  runs out to the present), at least `MIN_WINDOW` wide. */
+function bounds(series: Series[], now: number): { start: number; end: number } | null {
 	const r = dataRange(series);
-	if (!r) return [now - MIN_WINDOW, now];
-	const [lo, hi] = r;
-	const window = Math.max(hi - lo, MIN_WINDOW);
-	const pad = window * 0.03;
-	return [lo - pad, lo + window + pad];
+	if (!r) return null;
+	const end = Math.max(r[1], now);
+	return { start: Math.min(r[0], end - MIN_WINDOW), end };
 }
 
-/** x-axis tick times, evenly spaced from the first dot across the whole
- *  window (so while the chart is young the labels run ahead of the
- *  dots, and once it is older they end under the last dot). */
-export function timeTicks(series: Series[], count = 5): number[] {
-	const r = dataRange(series);
-	if (!r) return [];
-	const [lo, hi] = r;
-	const window = Math.max(hi - lo, MIN_WINDOW);
-	return Array.from({ length: count }, (_, i) => lo + (window * i) / (count - 1));
+/** The x-axis range: `bounds` plus a hair of margin either side so the
+ *  first and latest points aren't on the edge. */
+export function timeDomain(series: Series[], now: number = Date.now()): [number, number] {
+	const b = bounds(series, now);
+	if (!b) return [now - MIN_WINDOW, now];
+	const pad = (b.end - b.start) * 0.03;
+	return [b.start - pad, b.end + pad];
+}
+
+/** x-axis tick times, evenly spaced from the start of the window to now.
+ *  `count` is the most there will be: a short window gets fewer, so two
+ *  neighbouring labels are never the same date. */
+export function timeTicks(series: Series[], count = 5, now: number = Date.now()): number[] {
+	const b = bounds(series, now);
+	if (!b) return [];
+	const n = Math.max(2, Math.min(count, Math.floor((b.end - b.start) / DAY) + 1));
+	return Array.from({ length: n }, (_, i) => b.start + ((b.end - b.start) * i) / (n - 1));
+}
+
+/** Same calendar day (local time) — used to label the right edge "Today". */
+export function isToday(t: number, now: number = Date.now()): boolean {
+	const a = new Date(t);
+	const b = new Date(now);
+	return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
