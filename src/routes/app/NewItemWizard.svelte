@@ -306,8 +306,8 @@
 							{/if}
 							<div class="info">
 								<span class="pname">
-									<SizeBadge size={c.hit?.volume_size ?? c.sku?.size?.volume_size} small />
 									{titleCase(shown?.name ?? c.code)}
+									<SizeBadge size={c.hit?.volume_size ?? c.sku?.size?.volume_size} small />
 								</span>
 								<span class="sub">
 									{money(c.hit?.sale_price ?? c.sku?.price?.sale_price ?? null)}
@@ -368,8 +368,8 @@
 								{#if hit.image_url}<img src={hit.image_url} alt="" />{:else}<span class="noimg"></span>{/if}
 								<span class="info">
 									<span class="pname">
-										<SizeBadge size={hit.volume_size} small />
 										{titleCase(hit.name)}
+										<SizeBadge size={hit.volume_size} small />
 									</span>
 									<span class="sub">
 										{[hit.brand ? titleCase(hit.brand) : null].filter(Boolean).join(' · ')}

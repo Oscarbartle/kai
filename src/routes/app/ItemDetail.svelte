@@ -538,8 +538,8 @@
 						{/if}
 						<div class="sku-info">
 							<p class="sku-name">
-								<SizeBadge size={slot.data.size} />
 								<span class="sku-name-text">{slot.data.name}</span>
+								<SizeBadge size={slot.data.size} />
 							</p>
 							{#if slot.saveError}
 								<p class="inline-error">{slot.saveError}</p>

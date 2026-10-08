@@ -187,8 +187,8 @@
 					onmouseleave={() => (focusId = null)}
 				>
 					<span class="swatch" style={`--c:${s.color}`}></span>
-					<SizeBadge size={s.size} small />
 					<span class="chip-name">{s.label}</span>
+					<SizeBadge size={s.size} small />
 					{#if sum}
 						<span class="chip-price">{formatMoney(sum.latest)}</span>
 						{#if s.dots.length > 1}
