@@ -94,8 +94,16 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
     out to Oscar's partner; the release sits as a draft (invisible to
     "latest") until someone manually publishes it on GitHub, a
     last-look safety gate before a real person's app auto-updates.
-  - **No macOS build wired up yet** — Windows only, matching "Windows
-    first" above. The workflow runs on `windows-latest` only.
+  - **macOS (Apple Silicon) is built in the same workflow** — a matrix
+    over `windows-latest` and `macos-latest` (`--target aarch64-apple-darwin`);
+    `tauri-action` merges both into one draft release and one
+    `latest.json`. An OS with no entry in that manifest can't detect
+    updates (a Mac on v0.4.2 saw nothing, because v0.4.2's manifest only
+    had `windows-x86_64*`). **The Mac leg has not run in CI yet** — the
+    first tag after it landed (v0.4.3 or later) is its first real test.
+    Unsigned/un-notarized (no Apple Developer account): a copy sent to
+    another Mac needs right-click → Open or `xattr -cr Kai.app`; updates
+    still verify via the minisign key, not Apple's.
   - Version bump is manual and three-places: `package.json`,
     `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` all need the
     same version before tagging a release, or the app's own reported
@@ -810,6 +818,45 @@ items the review saves directly, as in slice 2.
   above was found, but still pinned `vite.config.js`'s `host` and
   `tauri.conf.json`'s `devUrl` to `127.0.0.1` explicitly to remove the
   ambiguity.
+
+## macOS notes (found building and running it, 2026-10-06)
+
+- **Build locally**: `npm ci && npm run tauri build -- --bundles app` →
+  `target/release/bundle/macos/Kai.app` (arm64, ad-hoc signed). Plain
+  `tauri build` also tries a `.dmg`, and `bundle_dmg.sh` failed here (it
+  scripts Finder; needs Automation permission) — the `.app` is fine, so
+  skip the dmg. Without the updater key in the environment the very last
+  step (signing the updater `.tar.gz`) errors after the `.app` already
+  exists; harmless locally.
+- **Woolworths cookies — wry bug on macOS.** `Webview::cookies_for_url`
+  compares a cookie's domain to `www.woolworths.co.nz` with `==`, but
+  WKWebView reports site-wide cookies as `.woolworths.co.nz` (leading dot),
+  so they were silently dropped and only host-only guest/tracking cookies
+  came back. `cookie_jar_from_window` (`commands.rs`) now reads all cookies
+  with `window.cookies()` and matches `woolworths.co.nz` /
+  `www.woolworths.co.nz` itself (dot-trimmed). Same code path on Windows.
+  The Diagnose output also lists every cookie in the store by domain
+  (names only) — that is what showed the Auth0/Keycloak cookies on
+  `auth.`/`iam.` and the missing www session.
+- **Session cookies don't survive a relaunch.** Repeated kill-and-relaunch
+  while testing wiped the www session each time (Auth0's own cookies stay,
+  so the login window then auto-completes without a password). Judge a
+  login with one clean run: sign in, don't restart, run Diagnose. Whether
+  a normal quit-and-reopen keeps the login is still untested.
+- **Open-file limit — "Couldn't reach remote server" on the Pantry.** A
+  Finder-launched Mac app has a soft limit of 256 open files, and the
+  Pantry fires one request per item at once; every socket and DNS lookup
+  is a file. Past ~250 the requests failed with `error sending request
+  for url …/items/N/skus` while the server, token and TLS were fine (the
+  same client did 300 concurrent requests from a terminal). The system log
+  said `socketpair failed 24 (Too many open files)`
+  (`/usr/bin/log show --predicate 'process == "kai"'` — plain `log` is a
+  zsh builtin). Fix: `raise_open_file_limit()` in `lib.rs` raises
+  `RLIMIT_NOFILE` at startup (capped at 10240 on macOS); no-op on
+  Windows. The Pantry's per-item request pattern itself is unchanged — the
+  phone app avoids it with the bulk `GET /pantry`; the desktop could too.
+- **Confirmed working on the Mac (tested by Oscar)**: remote mode, Woolworths
+  sign-in, and cart-add.
 
 ## Woolworths NZ API (confirmed live, no auth required)
 
