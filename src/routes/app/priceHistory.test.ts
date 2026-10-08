@@ -113,6 +113,15 @@ test('the right edge is the present: the axis runs from the first dot to now', (
 	assert.equal(ticks[4], NOW);
 });
 
+test('no empty space before the data once there is more than a day of history', () => {
+	// First dot ~2 days ago: the axis starts at it, not a day earlier.
+	const s = buildSeries([pt(1, '2026-10-06T03:00:00Z', 3), pt(1, '2026-10-08T01:00:00Z', 3)], [{ id: 1, label: 'x' }]);
+	const ticks = timeTicks(s, 5, NOW);
+	assert.equal(ticks[0], Date.parse('2026-10-06T03:00:00Z'));
+	const [lo] = timeDomain(s, NOW);
+	assert.ok(Date.parse('2026-10-06T03:00:00Z') - lo < 0.05 * (NOW - Date.parse('2026-10-06T03:00:00Z')) + 1, 'only the hairline margin');
+});
+
 test('a brand-new item gets a minimum window ending now, its dot at the right', () => {
 	const s = buildSeries([pt(1, '2026-10-08T01:00:00Z', 3)], [{ id: 1, label: 'x' }]);
 	const ticks = timeTicks(s, 5, NOW);
@@ -124,7 +133,7 @@ test('a brand-new item gets a minimum window ending now, its dot at the right', 
 });
 
 test('a short window gets fewer labels so no two neighbours share a date', () => {
-	const s = buildSeries([pt(1, '2026-10-07T00:00:00Z', 3), pt(1, '2026-10-08T01:00:00Z', 3)], [{ id: 1, label: 'x' }]);
+	const s = buildSeries([pt(1, '2026-10-05T03:00:00Z', 3), pt(1, '2026-10-08T01:00:00Z', 3)], [{ id: 1, label: 'x' }]);
 	const ticks = timeTicks(s, 5, NOW);
 	assert.equal(ticks.length, 4, 'a 3-day window: one label per day');
 	for (let i = 1; i < ticks.length; i++) assert.ok(ticks[i] - ticks[i - 1] >= 86_400_000);

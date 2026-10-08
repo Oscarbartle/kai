@@ -105,8 +105,9 @@ const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
 /** The chart never shows less than this much time, so a brand-new item
- *  isn't a lone dot with nothing around it. */
-export const MIN_WINDOW = 3 * DAY;
+ *  isn't a lone dot on a zero-width axis. Anything with more than a day of
+ *  history starts exactly at its first dot — no empty space before the data. */
+export const MIN_WINDOW = DAY;
 
 function dataRange(series: Series[]): [number, number] | null {
 	const ts = series.flatMap((s) => s.dots.map((d) => d.t));
