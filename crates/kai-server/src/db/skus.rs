@@ -5,7 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use deadpool_postgres::Client;
-use kai_shared::skus::{Sku, SkuPrice, SkuQuantity, SkuSize, StoredSku};
+use kai_shared::skus::{PricePoint, Sku, SkuPrice, SkuQuantity, SkuSize, StoredSku};
 use serde_json::Value as Json;
 
 const SELECT_COLUMNS: &str = "
@@ -166,7 +166,44 @@ pub async fn save(client: &Client, item_id: i64, sku: &Sku) -> Result<StoredSku,
         .await
         .map_err(|e| format!("Couldn't save SKU: {e}"))?;
 
-    get(client, row.get(0)).await
+    let id: i64 = row.get(0);
+    // Every save is a fresh look at the price, so every save is a dot.
+    client
+        .execute(
+            "INSERT INTO sku_price_history (sku_id, sale_price, original_price, is_special, cup_price)
+             VALUES ($1, $2, $3, $4, $5)",
+            &[&id, &sku.price.sale_price, &sku.price.original_price, &sku.price.is_special, &sku.size.cup_price],
+        )
+        .await
+        .map_err(|e| format!("Couldn't record price history: {e}"))?;
+
+    get(client, id).await
+}
+
+/// Every recorded price for every SKU of an item, oldest first.
+pub async fn price_history_for_item(client: &Client, item_id: i64) -> Result<Vec<PricePoint>, String> {
+    let rows = client
+        .query(
+            "SELECT h.sku_id, h.recorded_at, h.sale_price, h.original_price, h.is_special, h.cup_price
+             FROM sku_price_history h
+             JOIN skus s ON s.id = h.sku_id
+             WHERE s.item_id = $1
+             ORDER BY h.recorded_at ASC, h.id ASC",
+            &[&item_id],
+        )
+        .await
+        .map_err(|e| format!("Couldn't load price history for item {item_id}: {e}"))?;
+    Ok(rows
+        .iter()
+        .map(|r| PricePoint {
+            sku_id: r.get(0),
+            recorded_at: r.get::<_, DateTime<Utc>>(1).to_rfc3339(),
+            sale_price: r.get(2),
+            original_price: r.get(3),
+            is_special: r.get(4),
+            cup_price: r.get(5),
+        })
+        .collect())
 }
 
 pub async fn delete(client: &Client, id: i64) -> Result<(), String> {

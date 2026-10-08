@@ -297,6 +297,29 @@ pub(crate) fn migrations() -> Migrations<'static> {
             );
             ",
         ),
+        // Price history: one row per SKU per fetch, for the chart at the
+        // bottom of an item. Seeded with each existing SKU's current
+        // price, dated by when it was last fetched, so no chart starts
+        // empty.
+        M::up(
+            "
+            CREATE TABLE sku_price_history (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                sku_id         INTEGER NOT NULL REFERENCES skus(id) ON DELETE CASCADE,
+                recorded_at    TEXT NOT NULL DEFAULT (datetime('now')),
+                sale_price     REAL,
+                original_price REAL,
+                is_special     INTEGER NOT NULL DEFAULT 0,
+                cup_price      REAL
+            );
+            CREATE INDEX idx_sku_price_history_sku ON sku_price_history(sku_id, recorded_at);
+            INSERT INTO sku_price_history
+                (sku_id, recorded_at, sale_price, original_price, is_special, cup_price)
+            SELECT id, COALESCE(updated_at, created_at, datetime('now')),
+                   sale_price, original_price, is_special, cup_price
+            FROM skus;
+            ",
+        ),
     ])
 }
 

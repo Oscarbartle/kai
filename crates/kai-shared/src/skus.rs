@@ -77,3 +77,19 @@ pub struct StoredSku {
     #[serde(flatten)]
     pub sku: Sku,
 }
+
+/// One dot on an item's price-history chart: what a SKU cost the moment it
+/// was fetched from the provider. A point is added on every save/refresh
+/// (even when nothing changed — "checked on this date" is information
+/// too), and a SKU's points go with it when it is deleted.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct PricePoint {
+    pub sku_id: i64,
+    /// UTC, RFC 3339.
+    pub recorded_at: String,
+    pub sale_price: Option<f64>,
+    pub original_price: Option<f64>,
+    pub is_special: bool,
+    /// $ per `cup_measure` — the cross-pack-size comparison number.
+    pub cup_price: Option<f64>,
+}
