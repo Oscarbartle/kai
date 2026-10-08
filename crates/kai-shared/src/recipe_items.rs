@@ -15,4 +15,11 @@ pub struct RecipeIngredient {
     pub name: String,
     pub amount: Option<f64>,
     pub unit: Option<String>,
+    /// A SKU of this item pinned for this recipe: lines added from the
+    /// recipe use it, trumping the item's ★ preferred SKU and the
+    /// cheapest-pick. `None` = no pin. The pin goes (back to `None`) if the
+    /// SKU is deleted. `#[serde(default)]` keeps a newer desktop working
+    /// against a server from before the field existed.
+    #[serde(default)]
+    pub sku_id: Option<i64>,
 }

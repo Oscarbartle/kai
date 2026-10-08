@@ -141,6 +141,23 @@ pub fn add_item(
     unit: Option<&str>,
     source_recipe_id: Option<i64>,
 ) -> Result<ShoppingListLine, String> {
+    add_item_pinned(conn, list_id, item_id, amount, unit, source_recipe_id, None)
+}
+
+/// `add_item`, with an optional SKU the caller wants for a *new* line (a
+/// recipe ingredient's pinned SKU). It outranks everything `cheapest_sku_id`
+/// weighs — the item's ★ preferred SKU and the cheapest-pick. An existing
+/// line being merged into keeps the SKU it already has, and a pin that
+/// isn't (any longer) one of this item's SKUs is ignored.
+fn add_item_pinned(
+    conn: &Connection,
+    list_id: i64,
+    item_id: i64,
+    amount: Option<f64>,
+    unit: Option<&str>,
+    source_recipe_id: Option<i64>,
+    pinned_sku_id: Option<i64>,
+) -> Result<ShoppingListLine, String> {
     validate_unit(unit)?;
 
     let existing_id: Option<i64> = conn
@@ -164,7 +181,21 @@ pub fn add_item(
         return get(conn, line_id);
     }
 
-    let sku_id = cheapest_sku_id(conn, item_id)?;
+    let pinned = match pinned_sku_id {
+        Some(id) => conn
+            .query_row(
+                "SELECT id FROM skus WHERE id = ?1 AND item_id = ?2",
+                params![id, item_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(|e| format!("Couldn't check pinned SKU {id}: {e}"))?,
+        None => None,
+    };
+    let sku_id = match pinned {
+        Some(id) => Some(id),
+        None => cheapest_sku_id(conn, item_id)?,
+    };
     conn.execute(
         "INSERT INTO shopping_list_items (list_id, item_id, amount, unit, sku_id, source_recipe_id)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -203,13 +234,14 @@ fn expand_recipe(
         if !items::get(conn, ingredient.item_id)?.is_perishable {
             continue;
         }
-        lines.push(add_item(
+        lines.push(add_item_pinned(
             conn,
             list_id,
             ingredient.item_id,
             Some(amount * scale),
             Some(unit),
             Some(recipe_id),
+            ingredient.sku_id,
         )?);
     }
     Ok(lines)
@@ -398,4 +430,153 @@ pub fn list_omitted(conn: &Connection, list_ids: &[i64]) -> Result<OmissionRepor
     }
 
     Ok(OmissionReport { recipe_ingredients, perishables })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{shopping_lists, skus};
+    use crate::woolworths::{Sku, SkuPrice, SkuQuantity, SkuSize};
+
+    fn conn() -> Connection {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        crate::db::migrations().to_latest(&mut conn).unwrap();
+        conn
+    }
+
+    fn sku(code: &str, size: &str, price: f64) -> Sku {
+        Sku {
+            provider: "woolworths".into(),
+            sku: code.into(),
+            name: format!("beef mince {size}"),
+            brand: None,
+            variety: None,
+            price: SkuPrice { sale_price: Some(price), original_price: Some(price), ..Default::default() },
+            size: SkuSize { volume_size: Some(size.into()), ..Default::default() },
+            quantity: SkuQuantity { unit: "Each".into(), ..Default::default() },
+            availability_status: None,
+            stock_level: None,
+            images: vec![],
+            allergens: vec![],
+            ingredients: vec![],
+        }
+    }
+
+    struct Fixture {
+        conn: Connection,
+        item_id: i64,
+        recipe_id: i64,
+        list_id: i64,
+        small: i64,
+        starred: i64,
+        big: i64,
+    }
+
+    /// Beef mince with a cheap 500g, a starred 750g and a pricey 1kg, in a
+    /// recipe that needs 500g.
+    fn fixture() -> Fixture {
+        let conn = conn();
+        let item = items::create(&conn, "Beef Mince").unwrap();
+        let small = skus::save(&conn, item.id, &sku("1", "500g", 15.25)).unwrap().id;
+        let starred = skus::save(&conn, item.id, &sku("2", "750g", 20.25)).unwrap().id;
+        let big = skus::save(&conn, item.id, &sku("3", "1kg", 30.99)).unwrap().id;
+        skus::set_preferred(&conn, starred, true).unwrap();
+        let recipe = recipes::create(&conn, "Cottage Pie").unwrap();
+        recipe_items::add(&conn, recipe.id, item.id).unwrap();
+        recipe_items::set_quantity(&conn, recipe.id, item.id, Some(500.0), Some("g")).unwrap();
+        let list = shopping_lists::create(&conn, "Weekly").unwrap();
+        Fixture { conn, item_id: item.id, recipe_id: recipe.id, list_id: list.id, small, starred, big }
+    }
+
+    fn picked(f: &Fixture) -> Option<i64> {
+        let lines = list_for_list(&f.conn, f.list_id).unwrap();
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        lines[0].sku.as_ref().map(|s| s.id)
+    }
+
+    #[test]
+    fn without_a_pin_the_items_starred_sku_is_used() {
+        let f = fixture();
+        add_recipe(&f.conn, f.list_id, f.recipe_id, None).unwrap();
+        assert_eq!(picked(&f), Some(f.starred));
+    }
+
+    #[test]
+    fn a_recipe_pin_beats_the_starred_sku() {
+        let f = fixture();
+        let ing = recipe_items::set_sku(&f.conn, f.recipe_id, f.item_id, Some(f.small)).unwrap();
+        assert_eq!(ing.sku_id, Some(f.small));
+        add_recipe(&f.conn, f.list_id, f.recipe_id, None).unwrap();
+        assert_eq!(picked(&f), Some(f.small), "the pin wins over the ★ 750g");
+    }
+
+    #[test]
+    fn a_pin_beats_cheapest_too_when_nothing_is_starred() {
+        let f = fixture();
+        skus::set_preferred(&f.conn, f.starred, false).unwrap();
+        // Unpinned: cheapest total (the 500g).
+        add_recipe(&f.conn, f.list_id, f.recipe_id, None).unwrap();
+        assert_eq!(picked(&f), Some(f.small));
+        // Pinned to the 1kg: the pin, though it's the dearest.
+        let list2 = shopping_lists::create(&f.conn, "Second").unwrap();
+        recipe_items::set_sku(&f.conn, f.recipe_id, f.item_id, Some(f.big)).unwrap();
+        add_recipe(&f.conn, list2.id, f.recipe_id, None).unwrap();
+        let lines = list_for_list(&f.conn, list2.id).unwrap();
+        assert_eq!(lines[0].sku.as_ref().map(|s| s.id), Some(f.big));
+    }
+
+    #[test]
+    fn clearing_the_pin_goes_back_to_the_normal_pick() {
+        let f = fixture();
+        recipe_items::set_sku(&f.conn, f.recipe_id, f.item_id, Some(f.big)).unwrap();
+        let ing = recipe_items::set_sku(&f.conn, f.recipe_id, f.item_id, None).unwrap();
+        assert_eq!(ing.sku_id, None);
+        add_recipe(&f.conn, f.list_id, f.recipe_id, None).unwrap();
+        assert_eq!(picked(&f), Some(f.starred));
+    }
+
+    #[test]
+    fn a_pin_only_affects_lines_added_afterwards() {
+        let f = fixture();
+        add_recipe(&f.conn, f.list_id, f.recipe_id, None).unwrap();
+        recipe_items::set_sku(&f.conn, f.recipe_id, f.item_id, Some(f.big)).unwrap();
+        // Adding the recipe again merges into the existing line, which keeps its SKU.
+        add_recipe(&f.conn, f.list_id, f.recipe_id, None).unwrap();
+        assert_eq!(picked(&f), Some(f.starred));
+    }
+
+    #[test]
+    fn deleting_the_pinned_sku_clears_the_pin() {
+        let f = fixture();
+        recipe_items::set_sku(&f.conn, f.recipe_id, f.item_id, Some(f.big)).unwrap();
+        skus::delete(&f.conn, f.big).unwrap();
+        let ing = recipe_items::list_for_recipe(&f.conn, f.recipe_id).unwrap();
+        assert_eq!(ing[0].sku_id, None, "ON DELETE SET NULL");
+        add_recipe(&f.conn, f.list_id, f.recipe_id, None).unwrap();
+        assert_eq!(picked(&f), Some(f.starred), "falls back to the normal pick");
+    }
+
+    #[test]
+    fn a_pin_must_be_one_of_that_items_own_skus() {
+        let f = fixture();
+        let other = items::create(&f.conn, "Onion").unwrap();
+        let foreign = skus::save(&f.conn, other.id, &sku("9", "1kg", 3.0)).unwrap().id;
+        let err = recipe_items::set_sku(&f.conn, f.recipe_id, f.item_id, Some(foreign)).unwrap_err();
+        assert!(err.contains("isn't one of"), "{err}");
+        let err = recipe_items::set_sku(&f.conn, f.recipe_id, f.item_id, Some(99_999)).unwrap_err();
+        assert!(err.contains("No SKU"), "{err}");
+        let err = recipe_items::set_sku(&f.conn, f.recipe_id, other.id, None).unwrap_err();
+        assert!(err.contains("isn't linked"), "{err}");
+        // Nothing was changed by the refused attempts.
+        assert_eq!(recipe_items::list_for_recipe(&f.conn, f.recipe_id).unwrap()[0].sku_id, None);
+    }
+
+    #[test]
+    fn a_plain_item_drop_ignores_recipe_pins() {
+        let f = fixture();
+        recipe_items::set_sku(&f.conn, f.recipe_id, f.item_id, Some(f.big)).unwrap();
+        add_item(&f.conn, f.list_id, f.item_id, Some(1.0), Some("count"), None).unwrap();
+        assert_eq!(picked(&f), Some(f.starred), "only the recipe's own lines use its pin");
+    }
 }

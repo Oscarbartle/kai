@@ -19,6 +19,10 @@ pub fn router() -> Router<AppState> {
             "/recipes/{recipe_id}/items/{item_id}/quantity",
             patch(set_recipe_item_quantity),
         )
+        .route(
+            "/recipes/{recipe_id}/items/{item_id}/sku",
+            patch(set_recipe_item_sku),
+        )
 }
 
 #[derive(Deserialize)]
@@ -51,6 +55,20 @@ async fn list_recipe_ingredients(
 ) -> Result<Json<Vec<RecipeIngredient>>, AppError> {
     let client = state.pool.get().await?;
     Ok(Json(recipe_items::list_for_recipe(&client, recipe_id).await?))
+}
+
+#[derive(Deserialize)]
+struct SkuBody {
+    sku_id: Option<i64>,
+}
+
+async fn set_recipe_item_sku(
+    State(state): State<AppState>,
+    Path((recipe_id, item_id)): Path<(i64, i64)>,
+    Json(body): Json<SkuBody>,
+) -> Result<Json<RecipeIngredient>, AppError> {
+    let client = state.pool.get().await?;
+    Ok(Json(recipe_items::set_sku(&client, recipe_id, item_id, body.sku_id).await?))
 }
 
 #[derive(Deserialize)]
