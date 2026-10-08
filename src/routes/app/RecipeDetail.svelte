@@ -129,6 +129,16 @@
 	let tagInput: string = $state('');
 	let tagError: string | null = $state(null);
 	let ingredients: Ingredient[] = $state([]);
+	// Pinning a SKU is an occasional, advanced thing, so each card hides the
+	// selector behind a small + until it's wanted. These are the items whose
+	// selector was opened by hand; a *pinned* ingredient always shows its
+	// selector, since an override shouldn't be hidden.
+	let openPins: number[] = $state([]);
+
+	function togglePinSelector(itemId: number) {
+		openPins = openPins.includes(itemId) ? openPins.filter((i) => i !== itemId) : [...openPins, itemId];
+	}
+
 	// Each ingredient's item's SKUs, for the pin selector. Fetched once per item.
 	let skusByItem: Record<number, PinSku[]> = $state({});
 
@@ -530,6 +540,7 @@
 			{#each ingredients as ingredient (ingredient.item_id)}
 				{@const pick = pickerItems.find((p) => p.item.id === ingredient.item_id)}
 				{@const skus = skusByItem[ingredient.item_id] ?? []}
+				{@const pinOpen = ingredient.sku_id != null || openPins.includes(ingredient.item_id)}
 				<div class="dropped-card">
 					<button
 						class="remove-btn"
@@ -567,21 +578,34 @@
 								<option value={unit}>{unit}</option>
 							{/each}
 						</select>
+						{#if skus.length > 0 && ingredient.sku_id == null}
+							<button
+								class="pin-toggle"
+								aria-expanded={pinOpen}
+								aria-label={pinOpen ? 'Hide the SKU choice' : 'Choose a specific SKU for this ingredient'}
+								title={pinOpen ? 'Hide' : 'Choose a specific SKU for this ingredient'}
+								onclick={() => togglePinSelector(ingredient.item_id)}
+							>
+								{pinOpen ? '−' : '+'}
+							</button>
+						{/if}
 					</div>
-					<select
-						class="ingredient-sku"
-						class:pinned={ingredient.sku_id != null}
-						aria-label="SKU to buy for this ingredient"
-						title="Which product to put on a shopping list for this recipe. Beats the item's ★ preferred SKU."
-						disabled={skus.length === 0}
-						value={ingredient.sku_id ?? ''}
-						onchange={(e) => pinSku(ingredient, e.currentTarget)}
-					>
-						<option value="">{skus.length === 0 ? 'No SKUs linked' : autoPickLabel(skus)}</option>
-						{#each skus as s (s.id)}
-							<option value={s.id}>{pinOptionLabel(s, sizeLabel, titleCase)}</option>
-						{/each}
-					</select>
+					{#if pinOpen}
+						<select
+							class="ingredient-sku"
+							class:pinned={ingredient.sku_id != null}
+							aria-label="SKU to buy for this ingredient"
+							title="Which product to put on a shopping list for this recipe. Beats the item's ★ preferred SKU."
+							disabled={skus.length === 0}
+							value={ingredient.sku_id ?? ''}
+							onchange={(e) => pinSku(ingredient, e.currentTarget)}
+						>
+							<option value="">{skus.length === 0 ? 'No SKUs linked' : autoPickLabel(skus)}</option>
+							{#each skus as s (s.id)}
+								<option value={s.id}>{pinOptionLabel(s, sizeLabel, titleCase)}</option>
+							{/each}
+						</select>
+					{/if}
 				</div>
 			{:else}
 				<p class="drop-zone-message">Drag items here from the sidebar</p>
@@ -1157,6 +1181,28 @@
 		background: #1e1e1d;
 		color: #fff;
 		font-size: 0.8rem;
+	}
+
+	/* The little + that reveals the SKU selector — same dashed look as the
+	   "+ tag" / "+ SKU" affordances elsewhere. */
+	.pin-toggle {
+		flex: none;
+		width: 1.7rem;
+		height: 1.7rem;
+		padding: 0;
+		margin-left: auto;
+		border: 1px dashed #666;
+		border-radius: 50%;
+		background: transparent;
+		color: #bbb;
+		font-size: 1rem;
+		line-height: 1;
+		cursor: pointer;
+	}
+
+	.pin-toggle:hover {
+		border-color: #52677a;
+		color: #fff;
 	}
 
 	.ingredient-sku {
