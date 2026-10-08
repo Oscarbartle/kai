@@ -15,6 +15,8 @@ export interface PricePoint {
 export interface SkuRef {
 	id: number;
 	label: string;
+	/** Pack size text for the badge ("500g"); tells similarly-named SKUs apart. */
+	size?: string | null;
 }
 
 export interface Dot {
@@ -29,6 +31,7 @@ export interface Dot {
 export interface Series {
 	skuId: number;
 	label: string;
+	size: string | null;
 	color: string;
 	dots: Dot[];
 }
@@ -44,6 +47,7 @@ export function buildSeries(points: PricePoint[], skus: SkuRef[]): Series[] {
 	return skus.map((sku, i) => ({
 		skuId: sku.id,
 		label: sku.label,
+		size: sku.size ?? null,
 		color: PALETTE[i % PALETTE.length],
 		dots: points
 			.filter((p) => p.sku_id === sku.id && p.sale_price != null)

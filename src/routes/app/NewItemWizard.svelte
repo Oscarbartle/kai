@@ -75,6 +75,7 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
 	import { untrack } from 'svelte';
+	import SizeBadge from './SizeBadge.svelte';
 
 	let {
 		items = $bindable(),
@@ -304,10 +305,12 @@
 								<span class="noimg"></span>
 							{/if}
 							<div class="info">
-								<span class="pname">{titleCase(shown?.name ?? c.code)}</span>
+								<span class="pname">
+									<SizeBadge size={c.hit?.volume_size ?? c.sku?.size?.volume_size} small />
+									{titleCase(shown?.name ?? c.code)}
+								</span>
 								<span class="sub">
-									{c.hit?.volume_size ?? c.sku?.size?.volume_size ?? ''}
-									· {money(c.hit?.sale_price ?? c.sku?.price?.sale_price ?? null)}
+									{money(c.hit?.sale_price ?? c.sku?.price?.sale_price ?? null)}
 									· sku {c.code}
 								</span>
 								{#if c.status === 'loading'}
@@ -364,9 +367,12 @@
 							<button class="hit" class:picked onclick={() => toggle(item, hit)} aria-pressed={picked}>
 								{#if hit.image_url}<img src={hit.image_url} alt="" />{:else}<span class="noimg"></span>{/if}
 								<span class="info">
-									<span class="pname">{titleCase(hit.name)}</span>
+									<span class="pname">
+										<SizeBadge size={hit.volume_size} small />
+										{titleCase(hit.name)}
+									</span>
 									<span class="sub">
-										{[hit.brand ? titleCase(hit.brand) : null, hit.volume_size].filter(Boolean).join(' · ')}
+										{[hit.brand ? titleCase(hit.brand) : null].filter(Boolean).join(' · ')}
 										{#if hit.availability && !/in stock/i.test(hit.availability)}
 											<span class="bad">· {hit.availability}</span>
 										{/if}

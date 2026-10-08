@@ -8,6 +8,7 @@
 	unit-tested.
 -->
 <script lang="ts">
+	import SizeBadge from './SizeBadge.svelte';
 	import {
 		formatAxisMoney,
 		formatFull,
@@ -138,7 +139,7 @@
 								stroke={p.series.color}
 								fill={pt.dot.special ? 'var(--chart-bg)' : p.series.color}
 							>
-								<title>{p.series.label}: {formatMoney(pt.dot.price)}, {formatFull(pt.dot.t)}</title>
+								<title>{p.series.label}{p.series.size ? ` ${p.series.size}` : ''}: {formatMoney(pt.dot.price)}, {formatFull(pt.dot.t)}</title>
 							</circle>
 						{/each}
 					</g>
@@ -155,7 +156,10 @@
 					class:flip={tip.x > W * 0.62}
 					style={`left:${tip.x}px; top:${tip.y}px`}
 				>
-					<span class="tip-name" style={`color:${tip.series.color}`}>{tip.series.label}</span>
+					<span class="tip-name" style={`color:${tip.series.color}`}>
+						{tip.series.label}
+						<SizeBadge size={tip.series.size} small />
+					</span>
 					<span class="tip-price">
 						{formatMoney(tip.dot.price)}
 						{#if tip.dot.special}<span class="tip-special">special</span>{/if}
@@ -183,6 +187,7 @@
 					onmouseleave={() => (focusId = null)}
 				>
 					<span class="swatch" style={`--c:${s.color}`}></span>
+					<SizeBadge size={s.size} small />
 					<span class="chip-name">{s.label}</span>
 					{#if sum}
 						<span class="chip-price">{formatMoney(sum.latest)}</span>
@@ -313,10 +318,11 @@
 	}
 
 	.tip-name {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
 		font-weight: 600;
-		max-width: 16rem;
-		overflow: hidden;
-		text-overflow: ellipsis;
+		max-width: 18rem;
 	}
 
 	.tip-price {
