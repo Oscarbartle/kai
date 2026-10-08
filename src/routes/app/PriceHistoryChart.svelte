@@ -24,10 +24,12 @@
 
 	let { series }: { series: Series[] } = $props();
 
-	// Drawing space (the SVG scales to its container; text scales with it).
-	const W = 720;
-	const H = 320;
-	const M = { l: 58, r: 22, t: 18, b: 36 };
+	// Drawn at the container's real pixel width (1 unit = 1px), so text and
+	// dots stay a normal size however wide the window is.
+	let boxWidth = $state(720);
+	const W = $derived(Math.max(320, boxWidth));
+	const H = 250;
+	const M = { l: 52, r: 18, t: 14, b: 30 };
 
 	let hiddenIds: number[] = $state([]);
 	let focusId: number | null = $state(null);
@@ -50,10 +52,7 @@
 	const allPts = $derived(plotted.flatMap((p) => p.pts.map((pt) => ({ ...pt, series: p.series }))));
 	const xTicks = $derived(timeTicks(visible));
 	// Labels describe the dots' own span, not the padded drawing range.
-	const dataSpan = $derived.by(() => {
-		const ts = visible.flatMap((s) => s.dots.map((d) => d.t));
-		return ts.length ? Math.max(...ts) - Math.min(...ts) : 0;
-	});
+	const dataSpan = $derived(xTicks.length > 1 ? xTicks[xTicks.length - 1] - xTicks[0] : 0);
 	const dotCount = $derived(totalDots(series));
 
 	function path(pts: { x: number; y: number }[]): string {
@@ -68,9 +67,9 @@
 	function onMove(e: MouseEvent) {
 		const svg = e.currentTarget as SVGSVGElement;
 		const r = svg.getBoundingClientRect();
-		const px = ((e.clientX - r.left) / r.width) * W;
-		const py = ((e.clientY - r.top) / r.height) * H;
-		const hit = nearestDot(allPts, px, py, 26);
+		const px = e.clientX - r.left;
+		const py = e.clientY - r.top;
+		const hit = nearestDot(allPts, px, py, 18);
 		tip = hit ? { x: hit.x, y: hit.y, series: hit.series, dot: hit.dot } : null;
 	}
 
@@ -96,9 +95,11 @@
 	{#if dotCount === 0}
 		<p class="empty">No prices recorded yet. Every refresh adds a dot.</p>
 	{:else}
-		<div class="plot">
+		<div class="plot" bind:clientWidth={boxWidth}>
 			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 			<svg
+				width={W}
+				height={H}
 				viewBox={`0 0 ${W} ${H}`}
 				role="img"
 				aria-label={label}
@@ -115,8 +116,8 @@
 					<text
 						class="axis"
 						x={x(t)}
-						y={H - M.b + 20}
-						text-anchor={xTicks.length === 1 ? 'middle' : i === 0 ? 'start' : i === xTicks.length - 1 ? 'end' : 'middle'}
+						y={H - M.b + 18}
+						text-anchor={i === 0 ? 'start' : i === xTicks.length - 1 ? 'end' : 'middle'}
 					>
 						{formatTick(t, dataSpan)}
 					</text>
@@ -133,7 +134,7 @@
 								class:special={pt.dot.special}
 								cx={pt.x}
 								cy={pt.y}
-								r="4.5"
+								r="4"
 								stroke={p.series.color}
 								fill={pt.dot.special ? 'var(--chart-bg)' : p.series.color}
 							>
@@ -144,7 +145,7 @@
 				{/each}
 
 				{#if tip}
-					<circle class="ring" cx={tip.x} cy={tip.y} r="9" stroke={tip.series.color} />
+					<circle class="ring" cx={tip.x} cy={tip.y} r="8" stroke={tip.series.color} />
 				{/if}
 			</svg>
 
@@ -152,7 +153,7 @@
 				<div
 					class="tip"
 					class:flip={tip.x > W * 0.62}
-					style={`left:${(tip.x / W) * 100}%; top:${(tip.y / H) * 100}%`}
+					style={`left:${tip.x}px; top:${tip.y}px`}
 				>
 					<span class="tip-name" style={`color:${tip.series.color}`}>{tip.series.label}</span>
 					<span class="tip-price">
@@ -210,7 +211,7 @@
 		background: var(--chart-bg);
 		border: 1px solid #2f2f2d;
 		border-radius: 12px;
-		padding: 1rem 1rem 0.9rem;
+		padding: 0.8rem 0.9rem 0.8rem;
 	}
 
 	.plot {
@@ -219,8 +220,6 @@
 
 	svg {
 		display: block;
-		width: 100%;
-		height: auto;
 		overflow: visible;
 	}
 
@@ -232,7 +231,7 @@
 
 	.axis {
 		fill: #9a9a96;
-		font-size: 12px;
+		font-size: 11.5px;
 		font-variant-numeric: tabular-nums;
 	}
 

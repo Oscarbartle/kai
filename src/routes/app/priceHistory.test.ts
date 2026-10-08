@@ -7,6 +7,7 @@ import {
 	nearestDot,
 	niceTicks,
 	PALETTE,
+	MIN_WINDOW,
 	timeDomain,
 	timeTicks,
 	totalDots,
@@ -93,27 +94,40 @@ test('niceTicks on big and tiny ranges', () => {
 	assert.ok(tiny.ticks.every((t) => Number.isFinite(t)));
 });
 
-test('timeDomain gives a lone moment room, and pads a real range a little', () => {
-	const t = Date.parse('2026-10-06T12:00:00Z');
+test('a young chart is left-weighted: first dot at the left, a week of room', () => {
+	const t0 = Date.parse('2026-10-06T12:00:00Z');
 	const one = buildSeries([pt(1, '2026-10-06T12:00:00Z', 3)], [{ id: 1, label: 'x' }]);
 	const [lo, hi] = timeDomain(one);
-	assert.ok(lo < t && hi > t && hi - lo >= 86_400_000);
-	const two = buildSeries([pt(1, '2026-10-01T00:00:00Z', 3), pt(1, '2026-10-11T00:00:00Z', 4)], [{ id: 1, label: 'x' }]);
+	assert.ok(lo < t0 && t0 - lo < 86_400_000, 'first dot is just inside the left edge');
+	assert.ok(hi - t0 >= MIN_WINDOW, 'a week of room to the right');
+	// A few refreshes the same afternoon stay on the left too.
+	const same = buildSeries([pt(1, '2026-10-06T12:00:00Z', 3), pt(1, '2026-10-06T15:00:00Z', 3.2)], [{ id: 1, label: 'x' }]);
+	const [, hi2] = timeDomain(same);
+	assert.ok(hi2 - Date.parse('2026-10-06T15:00:00Z') > 5 * 86_400_000);
+});
+
+test('an older chart fits its data: window grows past a week, small padding only', () => {
+	const two = buildSeries([pt(1, '2026-09-01T00:00:00Z', 3), pt(1, '2026-10-11T00:00:00Z', 4)], [{ id: 1, label: 'x' }]);
 	const [a, b] = timeDomain(two);
-	assert.ok(a < Date.parse('2026-10-01T00:00:00Z') && b > Date.parse('2026-10-11T00:00:00Z'));
+	const first = Date.parse('2026-09-01T00:00:00Z');
+	const last = Date.parse('2026-10-11T00:00:00Z');
+	assert.ok(a < first && b > last);
+	assert.ok(b - last < 3 * 86_400_000, 'only a hair of room after the last dot');
 	// With no data at all there is still a sane domain.
 	const [x, y] = timeDomain([], 1_000_000_000_000);
 	assert.ok(y > x);
 });
 
-test('x ticks run from the first dot to the last; a single moment gets one label', () => {
-	const two = buildSeries([pt(1, '2026-10-01T00:00:00Z', 3), pt(1, '2026-10-11T00:00:00Z', 4)], [{ id: 1, label: 'x' }]);
-	const ticks = timeTicks(two);
-	assert.equal(ticks.length, 5);
-	assert.equal(ticks[0], Date.parse('2026-10-01T00:00:00Z'));
-	assert.equal(ticks[4], Date.parse('2026-10-11T00:00:00Z'));
-	const one = buildSeries([pt(1, '2026-10-06T12:00:00Z', 3)], [{ id: 1, label: 'x' }]);
-	assert.deepEqual(timeTicks(one), [Date.parse('2026-10-06T12:00:00Z')]);
+test('x ticks start at the first dot and cover the whole window', () => {
+	const young = buildSeries([pt(1, '2026-10-06T12:00:00Z', 3)], [{ id: 1, label: 'x' }]);
+	const yt = timeTicks(young);
+	assert.equal(yt.length, 5);
+	assert.equal(yt[0], Date.parse('2026-10-06T12:00:00Z'));
+	assert.equal(yt[4] - yt[0], MIN_WINDOW);
+	const old = buildSeries([pt(1, '2026-10-01T00:00:00Z', 3), pt(1, '2026-10-21T00:00:00Z', 4)], [{ id: 1, label: 'x' }]);
+	const ot = timeTicks(old);
+	assert.equal(ot[0], Date.parse('2026-10-01T00:00:00Z'));
+	assert.equal(ot[4], Date.parse('2026-10-21T00:00:00Z'), 'ends under the last dot');
 	assert.deepEqual(timeTicks([]), []);
 });
 

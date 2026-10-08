@@ -100,31 +100,37 @@ function round(v: number, step: number): number {
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
-/** The x-axis range. A single moment (one dot, or several in the same
- *  second) gets a day of room either side so it sits mid-chart. */
-export function timeDomain(series: Series[], now: number = Date.now()): [number, number] {
+/** The chart never shows less than this much time, so a brand-new item
+ *  has its first dot at the left with room to grow into, and the chart
+ *  fills in from the left as refreshes accumulate. */
+export const MIN_WINDOW = 7 * DAY;
+
+function dataRange(series: Series[]): [number, number] | null {
 	const ts = series.flatMap((s) => s.dots.map((d) => d.t));
-	if (!ts.length) return [now - DAY, now + DAY];
-	let lo = Math.min(...ts);
-	let hi = Math.max(...ts);
-	if (hi - lo < HOUR) {
-		return [lo - DAY, hi + DAY];
-	}
-	const pad = (hi - lo) * 0.04;
-	return [lo - pad, hi + pad];
+	return ts.length ? [Math.min(...ts), Math.max(...ts)] : null;
 }
 
-/** x-axis tick times, evenly spaced from the first dot to the last so the
- *  end labels sit under the end dots (not under the padding beyond them).
- *  One moment of data (a lone dot, or refreshes within the same hour) gets
- *  a single label. */
+/** The x-axis range: starts at the first dot (a hair of margin so it isn't
+ *  on the edge), and runs to the last dot or `MIN_WINDOW` after the
+ *  first, whichever is later. */
+export function timeDomain(series: Series[], now: number = Date.now()): [number, number] {
+	const r = dataRange(series);
+	if (!r) return [now - MIN_WINDOW, now];
+	const [lo, hi] = r;
+	const window = Math.max(hi - lo, MIN_WINDOW);
+	const pad = window * 0.03;
+	return [lo - pad, lo + window + pad];
+}
+
+/** x-axis tick times, evenly spaced from the first dot across the whole
+ *  window (so while the chart is young the labels run ahead of the
+ *  dots, and once it is older they end under the last dot). */
 export function timeTicks(series: Series[], count = 5): number[] {
-	const ts = series.flatMap((s) => s.dots.map((d) => d.t));
-	if (!ts.length) return [];
-	const lo = Math.min(...ts);
-	const hi = Math.max(...ts);
-	if (hi - lo < HOUR) return [Math.round((lo + hi) / 2)];
-	return Array.from({ length: count }, (_, i) => lo + ((hi - lo) * i) / (count - 1));
+	const r = dataRange(series);
+	if (!r) return [];
+	const [lo, hi] = r;
+	const window = Math.max(hi - lo, MIN_WINDOW);
+	return Array.from({ length: count }, (_, i) => lo + (window * i) / (count - 1));
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
