@@ -36,6 +36,11 @@ test('one series per SKU, in the order given, with stable colours', () => {
 	assert.equal(s[0].dots[0].price, 3);
 });
 
+test('a series carries its SKU\'s pack size, or null', () => {
+	const s = buildSeries([], [{ id: 1, label: 'Beef mince', size: '500g' }, { id: 2, label: 'Beef mince' }]);
+	assert.deepEqual(s.map((x) => x.size), ['500g', null]);
+});
+
 test('dots are sorted by time whatever order the rows arrive in', () => {
 	const s = buildSeries(
 		[pt(1, '2026-10-03T00:00:00Z', 5), pt(1, '2026-10-01T00:00:00Z', 3), pt(1, '2026-10-02T00:00:00Z', 4)],

@@ -10,6 +10,9 @@
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import { describeUpdated } from './skuFreshness';
 	import PriceHistoryChart from './PriceHistoryChart.svelte';
+	import SizeBadge from './SizeBadge.svelte';
+	import { sizeLabel } from './skuSize';
+	import { titleCase } from './titleCase';
 	import { buildSeries, type PricePoint } from './priceHistory';
 
 	interface DbItem {
@@ -108,7 +111,7 @@
 			skuSlots
 				.filter((s) => s.dbId != null && s.data)
 				.sort((a, b) => (a.dbId as number) - (b.dbId as number))
-				.map((s) => ({ id: s.dbId as number, label: s.data!.name }))
+				.map((s) => ({ id: s.dbId as number, label: titleCase(s.data!.name), size: sizeLabel(s.data!.size) }))
 		)
 	);
 
@@ -535,7 +538,10 @@
 							<img class="sku-thumb" src={slot.data.images[0]} alt={slot.data.name} />
 						{/if}
 						<div class="sku-info">
-							<p class="sku-name">{slot.data.name}</p>
+							<p class="sku-name">
+								<span class="sku-name-text">{titleCase(slot.data.name)}</span>
+								<SizeBadge size={slot.data.size} />
+							</p>
 							{#if slot.saveError}
 								<p class="inline-error">{slot.saveError}</p>
 							{:else if slot.dbId == null}
@@ -1029,7 +1035,14 @@
 	}
 
 	.sku-name {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.2rem 0.55rem;
 		font-weight: bold;
+	}
+
+	.sku-name-text {
 		text-transform: capitalize;
 	}
 

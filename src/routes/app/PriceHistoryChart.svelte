@@ -8,6 +8,7 @@
 	unit-tested.
 -->
 <script lang="ts">
+	import SizeBadge from './SizeBadge.svelte';
 	import {
 		formatAxisMoney,
 		formatFull,
@@ -138,7 +139,7 @@
 								stroke={p.series.color}
 								fill={pt.dot.special ? 'var(--chart-bg)' : p.series.color}
 							>
-								<title>{p.series.label}: {formatMoney(pt.dot.price)}, {formatFull(pt.dot.t)}</title>
+								<title>{p.series.label}{p.series.size ? ` ${p.series.size}` : ''}: {formatMoney(pt.dot.price)}, {formatFull(pt.dot.t)}</title>
 							</circle>
 						{/each}
 					</g>
@@ -155,7 +156,10 @@
 					class:flip={tip.x > W * 0.62}
 					style={`left:${tip.x}px; top:${tip.y}px`}
 				>
-					<span class="tip-name" style={`color:${tip.series.color}`}>{tip.series.label}</span>
+					<span class="tip-name">
+						<span class="tip-label" style={`color:${tip.series.color}`}>{tip.series.label}</span>
+						<SizeBadge size={tip.series.size} small />
+					</span>
 					<span class="tip-price">
 						{formatMoney(tip.dot.price)}
 						{#if tip.dot.special}<span class="tip-special">special</span>{/if}
@@ -184,6 +188,7 @@
 				>
 					<span class="swatch" style={`--c:${s.color}`}></span>
 					<span class="chip-name">{s.label}</span>
+					<SizeBadge size={s.size} small />
 					{#if sum}
 						<span class="chip-price">{formatMoney(sum.latest)}</span>
 						{#if s.dots.length > 1}
@@ -304,6 +309,7 @@
 		box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
 		font-size: 0.8rem;
 		white-space: nowrap;
+		max-width: min(30rem, 80%);
 		pointer-events: none;
 		z-index: 2;
 	}
@@ -313,8 +319,17 @@
 	}
 
 	.tip-name {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		min-width: 0;
 		font-weight: 600;
-		max-width: 16rem;
+	}
+
+	/* A very long name is cut with an ellipsis rather than pushing the
+	   badge out of the box. */
+	.tip-label {
+		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
