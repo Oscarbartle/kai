@@ -91,6 +91,9 @@ impl SkusBackend for LocalBackend {
     async fn save_sku_to_item(&self, item_id: i64, sku: &Sku) -> Result<StoredSku, String> {
         skus::save(&*self.lock()?, item_id, sku)
     }
+    async fn price_history_for_item(&self, item_id: i64) -> Result<Vec<skus::PricePoint>, String> {
+        skus::price_history_for_item(&*self.lock()?, item_id)
+    }
     async fn get_sku(&self, id: i64) -> Result<StoredSku, String> {
         skus::get(&*self.lock()?, id)
     }

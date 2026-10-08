@@ -32,6 +32,7 @@ pub const TABLES: &[(&str, &str)] = &[
     ("shopping_list_items", "t.id"),
     ("settings", "t.key"),
     ("ingredient_aliases", "t.alias"),
+    ("sku_price_history", "t.id"),
 ];
 
 pub struct TableDump {

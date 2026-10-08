@@ -42,6 +42,15 @@ pub async fn list_skus_for_item(
 }
 
 #[tauri::command]
+pub async fn price_history_for_item(
+    backend: State<'_, ActiveBackend>,
+    item_id: i64,
+) -> Result<Vec<skus::PricePoint>, String> {
+    let backend = backend.lock().map_err(|e| e.to_string())?.clone();
+    backend.price_history_for_item(item_id).await
+}
+
+#[tauri::command]
 pub async fn update_item_name(
     backend: State<'_, ActiveBackend>,
     item_id: i64,

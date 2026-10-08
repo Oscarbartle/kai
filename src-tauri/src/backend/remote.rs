@@ -208,6 +208,9 @@ impl SkusBackend for RemoteBackend {
     async fn save_sku_to_item(&self, item_id: i64, sku: &Sku) -> Result<StoredSku, String> {
         self.post(&format!("/items/{item_id}/skus"), sku).await
     }
+    async fn price_history_for_item(&self, item_id: i64) -> Result<Vec<crate::db::skus::PricePoint>, String> {
+        self.get(&format!("/items/{item_id}/price-history")).await
+    }
     async fn get_sku(&self, id: i64) -> Result<StoredSku, String> {
         self.get(&format!("/skus/{id}")).await
     }

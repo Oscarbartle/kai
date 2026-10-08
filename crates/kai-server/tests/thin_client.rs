@@ -173,7 +173,7 @@ async fn static_app_and_bulk_endpoints() {
     // Every table the database has is in the export — a table added by a
     // future migration but forgotten in db::export::TABLES must fail here.
     for table in ["items", "skus", "tags", "item_tags", "recipes", "recipe_items", "recipe_tags",
-                  "shopping_lists", "shopping_list_items", "settings", "ingredient_aliases"] {
+                  "shopping_lists", "shopping_list_items", "settings", "ingredient_aliases", "sku_price_history"] {
         assert!(manifest["row_counts"].get(table).is_some(), "{table} missing from the manifest");
         assert!(read(&format!("{table}.json")).is_array(), "{table}.json is not a list");
     }

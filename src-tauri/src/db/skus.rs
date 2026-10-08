@@ -2,7 +2,7 @@ use crate::woolworths::{Sku, SkuPrice, SkuQuantity, SkuSize};
 use rusqlite::{params, Connection};
 
 // StoredSku moved to kai-shared (Phase B) — see crates/kai-shared/src/skus.rs.
-pub use kai_shared::skus::StoredSku;
+pub use kai_shared::skus::{PricePoint, StoredSku};
 
 /// Persists a fetched `Sku` against an item. Re-saving the same
 /// provider+sku pair for the same item updates the cached fields
@@ -90,13 +90,57 @@ pub fn save(conn: &Connection, item_id: i64, sku: &Sku) -> Result<StoredSku, Str
     )
     .map_err(|e| format!("Couldn't save SKU: {e}"))?;
 
-    conn.query_row(
-        "SELECT id FROM skus WHERE item_id = ?1 AND provider = ?2 AND sku = ?3",
-        params![item_id, sku.provider, sku.sku],
-        |row| row.get::<_, i64>(0),
+    let id = conn
+        .query_row(
+            "SELECT id FROM skus WHERE item_id = ?1 AND provider = ?2 AND sku = ?3",
+            params![item_id, sku.provider, sku.sku],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|e| format!("Couldn't find saved SKU: {e}"))?;
+
+    // Every save is a fresh look at the price, so every save is a dot.
+    conn.execute(
+        "INSERT INTO sku_price_history (sku_id, sale_price, original_price, is_special, cup_price)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            id,
+            sku.price.sale_price,
+            sku.price.original_price,
+            sku.price.is_special,
+            sku.size.cup_price,
+        ],
     )
-    .map_err(|e| format!("Couldn't find saved SKU: {e}"))
-    .and_then(|id| get(conn, id))
+    .map_err(|e| format!("Couldn't record price history: {e}"))?;
+
+    get(conn, id)
+}
+
+/// Every recorded price for every SKU of an item, oldest first.
+pub fn price_history_for_item(conn: &Connection, item_id: i64) -> Result<Vec<PricePoint>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT h.sku_id, strftime('%Y-%m-%dT%H:%M:%SZ', h.recorded_at),
+                    h.sale_price, h.original_price, h.is_special, h.cup_price
+             FROM sku_price_history h
+             JOIN skus s ON s.id = h.sku_id
+             WHERE s.item_id = ?1
+             ORDER BY h.recorded_at ASC, h.id ASC",
+        )
+        .map_err(|e| format!("Couldn't prepare price history query: {e}"))?;
+    let rows = stmt
+        .query_map(params![item_id], |row| {
+            Ok(PricePoint {
+                sku_id: row.get(0)?,
+                recorded_at: row.get(1)?,
+                sale_price: row.get(2)?,
+                original_price: row.get(3)?,
+                is_special: row.get(4)?,
+                cup_price: row.get(5)?,
+            })
+        })
+        .map_err(|e| format!("Couldn't load price history for item {item_id}: {e}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Couldn't read price history: {e}"))
 }
 
 pub fn delete(conn: &Connection, id: i64) -> Result<(), String> {
@@ -243,6 +287,84 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", true).unwrap();
         crate::db::migrations().to_latest(&mut conn).unwrap();
         conn
+    }
+
+    fn priced(sale: f64, special: bool) -> Sku {
+        let mut s = sku();
+        s.price.sale_price = Some(sale);
+        s.price.original_price = Some(if special { sale + 1.0 } else { sale });
+        s.price.is_special = special;
+        s.size.cup_price = Some(sale * 2.0);
+        s
+    }
+
+    #[test]
+    fn every_save_adds_a_price_point_oldest_first() {
+        let conn = conn();
+        let item = items::create(&conn, "Onion").unwrap();
+        let stored = save(&conn, item.id, &priced(3.50, false)).unwrap();
+        // A refresh with an unchanged price is still a dot, and so is a special.
+        save(&conn, item.id, &priced(3.50, false)).unwrap();
+        save(&conn, item.id, &priced(2.80, true)).unwrap();
+        // Make the order depend on the date, not on insertion luck.
+        conn.execute(
+            "UPDATE sku_price_history SET recorded_at = '2026-01-01 00:00:00' WHERE id = 3",
+            [],
+        )
+        .unwrap();
+
+        let history = price_history_for_item(&conn, item.id).unwrap();
+        assert_eq!(history.len(), 3);
+        assert_eq!(history[0].recorded_at, "2026-01-01T00:00:00Z");
+        assert_eq!(history[0].sale_price, Some(2.80));
+        assert!(history[0].is_special);
+        assert_eq!(history[0].original_price, Some(3.80));
+        assert_eq!(history[0].cup_price, Some(5.60));
+        assert!(history.iter().all(|p| p.sku_id == stored.id));
+        assert!(history[1].recorded_at.ends_with('Z') && history[1].recorded_at.starts_with("20"));
+    }
+
+    #[test]
+    fn price_history_is_per_item_and_goes_with_its_sku() {
+        let conn = conn();
+        let onion = items::create(&conn, "Onion").unwrap();
+        let milk = items::create(&conn, "Milk").unwrap();
+        let a = save(&conn, onion.id, &priced(3.0, false)).unwrap();
+        let mut other = priced(4.0, false);
+        other.sku = "999".into();
+        let b = save(&conn, onion.id, &other).unwrap();
+        save(&conn, milk.id, &priced(5.0, false)).unwrap();
+
+        let h = price_history_for_item(&conn, onion.id).unwrap();
+        assert_eq!(h.len(), 2, "both of the onion's SKUs, none of the milk's");
+        assert!(h.iter().any(|p| p.sku_id == a.id) && h.iter().any(|p| p.sku_id == b.id));
+
+        delete(&conn, a.id).unwrap();
+        let h = price_history_for_item(&conn, onion.id).unwrap();
+        assert_eq!(h.len(), 1, "deleting a SKU deletes its history");
+        assert_eq!(h[0].sku_id, b.id);
+        assert!(price_history_for_item(&conn, 12345).unwrap().is_empty());
+    }
+
+    #[test]
+    fn migration_seeds_one_point_per_existing_sku_from_its_last_fetch() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        // The database as it was before price history existed: every
+        // migration except the last one (the one that adds the table).
+        crate::db::migrations().to_version(&mut conn, 22).unwrap();
+        conn.execute("INSERT INTO items (name) VALUES ('Onion')", []).unwrap();
+        conn.execute(
+            "INSERT INTO skus (item_id, provider, sku, name, sale_price, original_price, is_special, cup_price, unit, updated_at)
+             VALUES (1, 'woolworths', '1', 'onions', 3.5, 3.5, 0, 7.0, 'Each', '2026-02-03 04:05:06')",
+            [],
+        )
+        .unwrap();
+        crate::db::migrations().to_latest(&mut conn).unwrap();
+        let h = price_history_for_item(&conn, 1).unwrap();
+        assert_eq!(h.len(), 1);
+        assert_eq!(h[0].recorded_at, "2026-02-03T04:05:06Z", "dated by the last fetch, not by migration day");
+        assert_eq!((h[0].sale_price, h[0].cup_price), (Some(3.5), Some(7.0)));
     }
 
     #[test]

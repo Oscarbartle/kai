@@ -113,6 +113,14 @@ async fn remote_backend_round_trips_against_a_real_server() {
     let skus_for_item = remote.list_skus_for_item(onion.id).await.expect("list skus");
     assert_eq!(skus_for_item.len(), 1);
 
+    // --- Price history (a table added in migration V3): every save is a dot ---
+    remote.save_sku_to_item(onion.id, &fixture_sku()).await.expect("re-save = a refresh");
+    let history = remote.price_history_for_item(onion.id).await.expect("price history");
+    assert_eq!(history.len(), 2, "one dot per save, even with an unchanged price: {history:?}");
+    assert!(history.iter().all(|p| p.sku_id == stored.id && p.sale_price == Some(3.5)));
+    assert!(history[0].recorded_at <= history[1].recorded_at, "oldest first");
+    assert!(history[0].recorded_at.contains('T'), "RFC 3339: {}", history[0].recorded_at);
+
     // --- Tags ---
     let tag = remote.add_tag_to_item(onion.id, "Produce").await.expect("add tag");
     let tags_for_item = remote.list_tags_for_item(onion.id).await.expect("list tags");

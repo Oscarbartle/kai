@@ -9,6 +9,8 @@
 	import { tick } from 'svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import { describeUpdated } from './skuFreshness';
+	import PriceHistoryChart from './PriceHistoryChart.svelte';
+	import { buildSeries, type PricePoint } from './priceHistory';
 
 	interface DbItem {
 		id: number;
@@ -95,6 +97,31 @@
 	let tagError: string | null = $state(null);
 	let skuSlots: SkuSlot[] = $state([]);
 	let error: string | null = $state(null);
+	let history: PricePoint[] = $state([]);
+	let historyError: string | null = $state(null);
+
+	// One line per saved SKU, in the order they were added (by id) so a
+	// SKU keeps its colour when a new one is added above it in the list.
+	const chartSeries = $derived(
+		buildSeries(
+			history,
+			skuSlots
+				.filter((s) => s.dbId != null && s.data)
+				.sort((a, b) => (a.dbId as number) - (b.dbId as number))
+				.map((s) => ({ id: s.dbId as number, label: s.data!.name }))
+		)
+	);
+
+	// Called after anything that adds, removes or refreshes a SKU. A
+	// failure here shouldn't get in the way of the SKU work itself.
+	async function loadHistory() {
+		try {
+			history = await invoke<PricePoint[]>('price_history_for_item', { itemId: item.id });
+			historyError = null;
+		} catch (e) {
+			historyError = String(e);
+		}
+	}
 
 	function skuSlotFromStored(stored: StoredSku): SkuSlot {
 		const { id, item_id, is_preferred, ...sku } = stored;
@@ -123,6 +150,7 @@
 		} catch (e) {
 			error = String(e);
 		}
+		await loadHistory();
 	}
 
 	load();
@@ -265,6 +293,7 @@
 			const stored = await invoke<StoredSku>('save_sku_to_item', { itemId: item.id, sku: slot.data });
 			slot.dbId = stored.id;
 			if (slot.data) slot.data = { ...slot.data, updated_at: stored.updated_at } as SkuData;
+			await loadHistory();
 		} catch (e) {
 			slot.saveError = String(e);
 		}
@@ -284,6 +313,7 @@
 			}
 		}
 		skuSlots = skuSlots.filter((s) => s.id !== slot.id);
+		await loadHistory();
 	}
 
 	async function refreshOneSku(slot: SkuSlot) {
@@ -294,6 +324,7 @@
 			const updated = await invoke<StoredSku>('refresh_sku', { skuId: slot.dbId });
 			const { id, item_id, ...sku } = updated;
 			slot.data = sku;
+			await loadHistory();
 		} catch (e) {
 			slot.refreshError = String(e);
 		} finally {
@@ -309,6 +340,7 @@
 		try {
 			const stored = await invoke<StoredSku[]>('refresh_skus_for_item', { itemId: item.id });
 			skuSlots = stored.map(skuSlotFromStored);
+			await loadHistory();
 		} catch (e) {
 			error = String(e);
 		} finally {
@@ -553,6 +585,24 @@
 		{:else}
 			<p class="muted">No SKUs linked yet.</p>
 		{/each}
+	</section>
+
+	<hr />
+
+	<section class="history">
+		<div class="skus-header">
+			<h2>Price history</h2>
+		</div>
+		{#if historyError}
+			<!-- Most likely a server from before price history existed (it has no such route). -->
+			<p class="inline-error">
+				Couldn't load price history: {historyError}. If you use the shared server, it may need updating.
+			</p>
+		{:else if chartSeries.length}
+			<PriceHistoryChart series={chartSeries} />
+		{:else}
+			<p class="muted">Link a SKU to start tracking its price.</p>
+		{/if}
 	</section>
 </div>
 

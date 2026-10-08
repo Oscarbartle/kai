@@ -4,12 +4,13 @@ use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::routing::{get, patch};
 use axum::{Json, Router};
-use kai_shared::skus::{Sku, StoredSku};
+use kai_shared::skus::{PricePoint, Sku, StoredSku};
 use serde::Deserialize;
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/items/{item_id}/skus", get(list_skus_for_item).post(save_sku_to_item))
+        .route("/items/{item_id}/price-history", get(price_history_for_item))
         .route("/skus/{id}", get(get_sku).delete(delete_sku))
         .route("/skus/{id}/preferred", patch(set_sku_preferred))
 }
@@ -20,6 +21,14 @@ async fn list_skus_for_item(
 ) -> Result<Json<Vec<StoredSku>>, AppError> {
     let client = state.pool.get().await?;
     Ok(Json(skus::list_for_item(&client, item_id).await?))
+}
+
+async fn price_history_for_item(
+    State(state): State<AppState>,
+    Path(item_id): Path<i64>,
+) -> Result<Json<Vec<PricePoint>>, AppError> {
+    let client = state.pool.get().await?;
+    Ok(Json(skus::price_history_for_item(&client, item_id).await?))
 }
 
 async fn save_sku_to_item(
