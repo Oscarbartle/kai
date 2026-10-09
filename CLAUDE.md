@@ -99,8 +99,16 @@ desktop app into a Tauri + Svelte + TypeScript app with a Rust backend.
     `tauri-action` merges both into one draft release and one
     `latest.json`. An OS with no entry in that manifest can't detect
     updates (a Mac on v0.4.2 saw nothing, because v0.4.2's manifest only
-    had `windows-x86_64*`). **The Mac leg has not run in CI yet** — the
-    first tag after it landed (v0.4.3 or later) is its first real test.
+    had `windows-x86_64*`). The legs run **one after the other**
+    (`max-parallel: 1`): both write to the same draft release and the same
+    `latest.json`, and two running at once can overwrite each other's entry.
+    **Releasing**: edit `RELEASE_NOTES.md` (plain language — it becomes the
+    release body, which the in-app updater shows as "what's new"), bump the
+    version in `package.json`, `src-tauri/Cargo.toml` and
+    `src-tauri/tauri.conf.json` (+ `cargo check` to refresh `Cargo.lock`),
+    merge that by PR (`main` is protected), then push a `v*.*.*` tag on the
+    merge commit; the draft release appears for a human to publish. v0.5.0
+    was the first release to run the Mac leg in CI.
     Unsigned/un-notarized (no Apple Developer account): a copy sent to
     another Mac needs right-click → Open or `xattr -cr Kai.app`; updates
     still verify via the minisign key, not Apple's.
