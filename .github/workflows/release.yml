@@ -21,6 +21,10 @@ jobs:
   release:
     strategy:
       fail-fast: false
+      # One platform at a time: both legs write to the same draft release and
+      # the same latest.json, and two running together can overwrite each
+      # other's entry (leaving one OS out of the update manifest).
+      max-parallel: 1
       matrix:
         include:
           - os: windows-latest
@@ -44,6 +48,18 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # What the in-app updater shows as "what's new" is the release body,
+      # which comes from RELEASE_NOTES.md — rewrite it before tagging.
+      - name: Read release notes
+        id: notes
+        shell: bash
+        run: |
+          {
+            echo 'body<<NOTES_EOF'
+            cat RELEASE_NOTES.md
+            echo 'NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -52,6 +68,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Kai ${{ github.ref_name }}"
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
